@@ -12,6 +12,16 @@ public class Program
         // Add services to the container.
 
         builder.Services.AddControllers();
+        const string corsPolicyName = "AllowFrontend";
+        builder.Services.AddCors(options =>
+        {
+            options.AddPolicy(corsPolicyName, policy =>
+            {
+                policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                    .AllowAnyHeader()
+                    .AllowAnyMethod();
+            });
+        });
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
@@ -26,6 +36,8 @@ public class Program
         }
 
         app.UseHttpsRedirection();
+
+        app.UseCors(corsPolicyName);
 
         app.UseAuthorization();
 
