@@ -1,3 +1,6 @@
+using IORManager.Models;
+using IORManager.Repositories;
+
 namespace IORManager;
 
 public class Program
@@ -9,12 +12,12 @@ public class Program
         // Add services to the container.
 
         builder.Services.AddControllers();
-        // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         builder.Services.AddOpenApi();
+
+        RegisterRepositories(builder.Services);
 
         var app = builder.Build();
 
-        // Configure the HTTP request pipeline.
         if (app.Environment.IsDevelopment())
         {
             app.MapOpenApi();
@@ -24,9 +27,60 @@ public class Program
 
         app.UseAuthorization();
 
-
         app.MapControllers();
 
         app.Run();
+    }
+
+    private static void RegisterRepositories(IServiceCollection services)
+    {
+        services.AddSingleton<IFinancialDocumentRepository<Invoice>>(_ =>
+            new InMemoryFinancialDocumentRepository<Invoice>(
+                new[]
+                {
+                    new Invoice(
+                        Guid.NewGuid(),
+                        "INV-001",
+                        DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-7)),
+                        "Acme Corp",
+                        1500m,
+                        new List<DocumentLine>
+                        {
+                            new("Consulting Services", 10, 150m)
+                        })
+                }));
+
+        services.AddSingleton<IFinancialDocumentRepository<Receipt>>(_ =>
+            new InMemoryFinancialDocumentRepository<Receipt>(
+                new[]
+                {
+                    new Receipt(
+                        Guid.NewGuid(),
+                        "RCPT-001",
+                        DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-5)),
+                        "Acme Corp",
+                        1500m,
+                        "INV-001",
+                        new List<ReceiptPayment>
+                        {
+                            new("Bank Transfer", 1500m)
+                        })
+                }));
+
+        services.AddSingleton<IFinancialDocumentRepository<PurchaseOrder>>(_ =>
+            new InMemoryFinancialDocumentRepository<PurchaseOrder>(
+                new[]
+                {
+                    new PurchaseOrder(
+                        Guid.NewGuid(),
+                        "PO-001",
+                        DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-14)),
+                        "Supply Co",
+                        3200m,
+                        new List<DocumentLine>
+                        {
+                            new("Laptops", 4, 800m)
+                        })
+                }));
     }
 }
