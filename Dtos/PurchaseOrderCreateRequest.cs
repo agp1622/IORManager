@@ -6,10 +6,10 @@ namespace IORManager.Dtos;
 public record PurchaseOrderCreateRequest
 {
     [Required]
-    public string OrderNumber { get; init; } = string.Empty;
+    public string PurchaseOrderNumber { get; init; } = string.Empty;
 
     [Required]
-    public DateOnly OrderDate { get; init; }
+    public DateOnly PurchaseOrderDate { get; init; }
         = DateOnly.FromDateTime(DateTime.UtcNow);
 
     [Required]
@@ -20,16 +20,17 @@ public record PurchaseOrderCreateRequest
 
     public PurchaseOrder ToPurchaseOrder()
     {
-        var lines = Lines.Select(line => line.ToDocumentLine()).ToList();
-        var total = lines.Sum(line => line.LineTotal);
+        var purchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(),
+            Number = PurchaseOrderNumber,
+            Date = PurchaseOrderDate,
+            SupplierName = SupplierName,
+            Lines = Lines.Select(line => line.ToDocumentLine()).ToList()
+        };
 
-        return new PurchaseOrder(
-            Guid.NewGuid(),
-            OrderNumber,
-            OrderDate,
-            SupplierName,
-            total,
-            lines);
+        purchaseOrder.RecalculateTotal();
+        return purchaseOrder;
     }
 }
 
@@ -46,5 +47,10 @@ public record PurchaseOrderLineRequest
     public decimal UnitPrice { get; init; }
         = 0m;
 
-    public DocumentLine ToDocumentLine() => new(Description, Quantity, UnitPrice);
+    public DocumentLine ToDocumentLine() => new()
+    {
+        Description = Description,
+        Quantity = Quantity,
+        UnitPrice = UnitPrice
+    };
 }

@@ -1,11 +1,21 @@
 namespace IORManager.Models;
 
-public record Receipt(
-    Guid Id,
-    string Number,
-    DateOnly Date,
-    string CustomerName,
-    decimal TotalAmount,
-    string? ReferenceNumber,
-    IReadOnlyList<ReceiptPayment> Payments)
-    : FinancialDocument(Id, Number, Date, CustomerName, TotalAmount);
+public class Receipt : FinancialDocument
+{
+    public Receipt()
+    {
+        Payments = new List<ReceiptPayment>();
+    }
+
+    public string CustomerName
+    {
+        get => PartyName;
+        set => PartyName = value;
+    }
+
+    public string? ReferenceNumber { get; set; }
+
+    public List<ReceiptPayment> Payments { get; set; }
+
+    public void RecalculateTotal() => TotalAmount = Payments.Sum(payment => payment.Amount);
+}

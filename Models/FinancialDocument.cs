@@ -1,8 +1,22 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace IORManager.Models;
 
-public abstract record FinancialDocument(
-    Guid Id,
-    string Number,
-    DateOnly Date,
-    string PartyName,
-    decimal TotalAmount);
+public abstract class FinancialDocument
+{
+    [Key]
+    public Guid Id { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string Number { get; set; } = string.Empty;
+
+    public DateOnly Date { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string PartyName { get; set; } = string.Empty;
+
+    [DataType(DataType.Currency)]
+    public decimal TotalAmount { get; set; }
+}

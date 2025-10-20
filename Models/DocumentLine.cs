@@ -1,6 +1,29 @@
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace IORManager.Models;
 
-public record DocumentLine(string Description, int Quantity, decimal UnitPrice)
+public class DocumentLine
 {
+    [Key]
+    public int Id { get; set; }
+
+    [Required]
+    [MaxLength(200)]
+    public string Description { get; set; } = string.Empty;
+
+    [Range(1, int.MaxValue)]
+    public int Quantity { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal UnitPrice { get; set; }
+
+    public Guid? InvoiceId { get; set; }
+    public Invoice? Invoice { get; set; }
+
+    public Guid? PurchaseOrderId { get; set; }
+    public PurchaseOrder? PurchaseOrder { get; set; }
+
+    [NotMapped]
     public decimal LineTotal => Quantity * UnitPrice;
 }
