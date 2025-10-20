@@ -1,0 +1,6 @@
+@IORManager_HostAddress = http://localhost:5031
+
+GET {{IORManager_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
