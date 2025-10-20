@@ -16,24 +16,25 @@ public record ReceiptCreateRequest
     public string CustomerName { get; init; } = string.Empty;
 
     public string? ReferenceNumber { get; init; }
-        = null;
+        = string.Empty;
 
     [MinLength(1)]
     public IReadOnlyList<ReceiptPaymentRequest> Payments { get; init; } = Array.Empty<ReceiptPaymentRequest>();
 
     public Receipt ToReceipt()
     {
-        var payments = Payments.Select(payment => payment.ToPayment()).ToList();
-        var total = payments.Sum(payment => payment.Amount);
+        var receipt = new Receipt
+        {
+            Id = Guid.NewGuid(),
+            Number = ReceiptNumber,
+            Date = ReceiptDate,
+            CustomerName = CustomerName,
+            ReferenceNumber = ReferenceNumber,
+            Payments = Payments.Select(payment => payment.ToReceiptPayment()).ToList()
+        };
 
-        return new Receipt(
-            Guid.NewGuid(),
-            ReceiptNumber,
-            ReceiptDate,
-            CustomerName,
-            total,
-            ReferenceNumber,
-            payments);
+        receipt.RecalculateTotal();
+        return receipt;
     }
 }
 
@@ -46,5 +47,9 @@ public record ReceiptPaymentRequest
     public decimal Amount { get; init; }
         = 0m;
 
-    public ReceiptPayment ToPayment() => new(Method, Amount);
+    public ReceiptPayment ToReceiptPayment() => new()
+    {
+        Method = Method,
+        Amount = Amount
+    };
 }

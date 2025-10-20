@@ -1,10 +1,19 @@
 namespace IORManager.Models;
 
-public record PurchaseOrder(
-    Guid Id,
-    string Number,
-    DateOnly Date,
-    string SupplierName,
-    decimal TotalAmount,
-    IReadOnlyList<DocumentLine> Lines)
-    : FinancialDocument(Id, Number, Date, SupplierName, TotalAmount);
+public class PurchaseOrder : FinancialDocument
+{
+    public PurchaseOrder()
+    {
+        Lines = new List<DocumentLine>();
+    }
+
+    public string SupplierName
+    {
+        get => PartyName;
+        set => PartyName = value;
+    }
+
+    public List<DocumentLine> Lines { get; set; }
+
+    public void RecalculateTotal() => TotalAmount = Lines.Sum(line => line.LineTotal);
+}

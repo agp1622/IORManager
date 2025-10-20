@@ -20,16 +20,17 @@ public record InvoiceCreateRequest
 
     public Invoice ToInvoice()
     {
-        var lines = Lines.Select(line => line.ToDocumentLine()).ToList();
-        var total = lines.Sum(line => line.LineTotal);
+        var invoice = new Invoice
+        {
+            Id = Guid.NewGuid(),
+            Number = InvoiceNumber,
+            Date = InvoiceDate,
+            CustomerName = CustomerName,
+            Lines = Lines.Select(line => line.ToDocumentLine()).ToList()
+        };
 
-        return new Invoice(
-            Guid.NewGuid(),
-            InvoiceNumber,
-            InvoiceDate,
-            CustomerName,
-            total,
-            lines);
+        invoice.RecalculateTotal();
+        return invoice;
     }
 }
 
@@ -46,5 +47,10 @@ public record InvoiceLineRequest
     public decimal UnitPrice { get; init; }
         = 0m;
 
-    public DocumentLine ToDocumentLine() => new(Description, Quantity, UnitPrice);
+    public DocumentLine ToDocumentLine() => new()
+    {
+        Description = Description,
+        Quantity = Quantity,
+        UnitPrice = UnitPrice
+    };
 }
