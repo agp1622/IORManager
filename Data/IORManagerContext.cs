@@ -58,12 +58,16 @@ public class IORManagerContext : DbContext
             builder.HasOne(line => line.Invoice)
                 .WithMany(invoice => invoice.Lines)
                 .HasForeignKey(line => line.InvoiceId)
-                .OnDelete(DeleteBehavior.Cascade);
+                // Prevent multiple cascade paths to FinancialDocument table on SQL Server.
+                // Use NoAction so the DB won't create ON DELETE CASCADE here. If parent deletion should remove
+                // children, perform explicit deletes in code or create a separate cleanup migration/trigger.
+                .OnDelete(DeleteBehavior.NoAction);
 
             builder.HasOne(line => line.PurchaseOrder)
                 .WithMany(purchaseOrder => purchaseOrder.Lines)
                 .HasForeignKey(line => line.PurchaseOrderId)
-                .OnDelete(DeleteBehavior.Cascade);
+                // Prevent multiple cascade paths to FinancialDocument table on SQL Server.
+                .OnDelete(DeleteBehavior.NoAction);
         });
     }
 

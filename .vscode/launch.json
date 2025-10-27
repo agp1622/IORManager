@@ -1,0 +1,68 @@
+{
+    // VS Code launch configurations for running and debugging the app.
+    // - .NET Core Launch (web): runs the compiled DLL. Build first or use the Tasks feature to build automatically.
+    // - Frontend: runs `npm run dev` in the frontend folder.
+    // - Compound: starts both the backend and frontend together.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": ".NET Core Launch (Backend)",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build backend",
+            "program": "${workspaceFolder}/bin/Debug/net9.0/IORManager.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development",
+                "ASPNETCORE_URLS": "http://localhost:5031"
+            },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Frontend: npm run dev",
+            "type": "pwa-node",
+            "request": "launch",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["run", "dev"],
+            "cwd": "${workspaceFolder}/frontend",
+            "console": "integratedTerminal",
+            "env": {
+                "VITE_API_BASE_URL": "http://localhost:5031/api"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Run Backend + Frontend",
+            "configurations": [".NET Core Launch (Backend)", "Frontend: npm run dev"]
+        }
+    ],
+    "tasks": [
+        {
+            "label": "build backend",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/IORManager.csproj"],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "run backend",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["run", "--project", "${workspaceFolder}/IORManager.csproj", "--urls", "http://localhost:5031"],
+            "problemMatcher": "$msCompile",
+            "presentation": { "reveal": "always" }
+        },
+        {
+            "label": "run frontend",
+            "type": "shell",
+            "command": "npm",
+            "args": ["run", "dev"],
+            "options": { "cwd": "${workspaceFolder}/frontend" },
+            "isBackground": true,
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using IORManager.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -54,7 +55,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
 
     private static byte[] CreateDocument(string title, IEnumerable<string> headerItems, Action<IContainer> content)
     {
-        return Document.Create(document =>
+        var doc = Document.Create(document =>
         {
             document.Page(page =>
             {
@@ -80,13 +81,20 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                     column.Item().Element(content);
                 });
 
-                page.Footer().AlignCenter().Text(text =>
-                {
-                    text.Span("Generated on ");
-                    text.Span(DateTime.Now.ToString("u"));
-                }).FontSize(9);
+                page.Footer()
+                    .AlignCenter()
+                    .DefaultTextStyle(TextStyle.Default.FontSize(9))
+                    .Text(text =>
+                    {
+                        text.Span("Generated on ");
+                        text.Span(DateTime.Now.ToString("u"));
+                    });
             });
-        }).GeneratePdf();
+        });
+
+        using var ms = new MemoryStream();
+        doc.GeneratePdf(ms);
+        return ms.ToArray();
     }
 
     private static void ComposeDocumentLines(IContainer container, IReadOnlyCollection<DocumentLine> lines, decimal totalAmount)
