@@ -5,7 +5,7 @@ const createEmptyPayment = () => ({
   amount: '0',
 })
 
-const ReceiptForm = ({ onSubmit, isSubmitting }) => {
+const ReceiptForm = ({ onSubmit, isSubmitting, t = (value) => value }) => {
   const today = new Date().toISOString().split('T')[0]
   const [receiptNumber, setReceiptNumber] = useState('')
   const [receiptDate, setReceiptDate] = useState(today)
@@ -62,17 +62,17 @@ const ReceiptForm = ({ onSubmit, isSubmitting }) => {
     <form className="document-form" onSubmit={handleSubmit}>
       <div className="field-grid">
         <label>
-          Receipt number
+          {t('receiptForm.receiptNumberLabel')}
           <input
             type="text"
             value={receiptNumber}
             onChange={(event) => setReceiptNumber(event.target.value)}
             required
-            placeholder="RCPT-001"
+            placeholder={t('receiptForm.receiptNumberPlaceholder')}
           />
         </label>
         <label>
-          Receipt date
+          {t('receiptForm.receiptDateLabel')}
           <input
             type="date"
             value={receiptDate}
@@ -81,41 +81,41 @@ const ReceiptForm = ({ onSubmit, isSubmitting }) => {
           />
         </label>
         <label>
-          Customer name
+          {t('receiptForm.customerNameLabel')}
           <input
             type="text"
             value={customerName}
             onChange={(event) => setCustomerName(event.target.value)}
             required
-            placeholder="Acme Corp"
+            placeholder={t('receiptForm.customerNamePlaceholder')}
           />
         </label>
         <label>
-          Reference number (optional)
+          {t('receiptForm.referenceNumberLabel')}
           <input
             type="text"
             value={referenceNumber}
             onChange={(event) => setReferenceNumber(event.target.value)}
-            placeholder="INV-001"
+            placeholder={t('receiptForm.referenceNumberPlaceholder')}
           />
         </label>
       </div>
 
       <div className="form-section">
         <div className="form-section__header">
-          <h4>Payments</h4>
+          <h4>{t('receiptForm.paymentsHeading')}</h4>
           <button
             type="button"
             className="button button--secondary"
             onClick={addPayment}
           >
-            Add payment
+            {t('receiptForm.addPayment')}
           </button>
         </div>
         {payments.map((payment, index) => (
           <div key={index} className="line-row">
             <label>
-              Method
+              {t('receiptForm.methodLabel')}
               <input
                 type="text"
                 value={payment.method}
@@ -123,11 +123,11 @@ const ReceiptForm = ({ onSubmit, isSubmitting }) => {
                   updatePayment(index, 'method', event.target.value)
                 }
                 required
-                placeholder="Bank transfer"
+                placeholder={t('receiptForm.methodPlaceholder')}
               />
             </label>
             <label>
-              Amount
+              {t('receiptForm.amountLabel')}
               <input
                 type="number"
                 min="0"
@@ -143,7 +143,7 @@ const ReceiptForm = ({ onSubmit, isSubmitting }) => {
               type="button"
               className="button button--icon"
               onClick={() => removePayment(index)}
-              aria-label="Remove payment"
+              aria-label={t('receiptForm.removePayment')}
               disabled={payments.length === 1}
             >
               ×
@@ -153,7 +153,7 @@ const ReceiptForm = ({ onSubmit, isSubmitting }) => {
       </div>
 
       <button type="submit" className="button" disabled={isSubmitting}>
-        {isSubmitting ? 'Saving receipt…' : 'Save receipt'}
+        {isSubmitting ? t('receiptForm.submitting') : t('receiptForm.submit')}
       </button>
     </form>
   )

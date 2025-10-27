@@ -27,6 +27,25 @@
   color: #52606d;
 }
 
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.toolbar__control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.toolbar__control select {
+  min-width: 180px;
+}
+
 .section-tabs {
   display: flex;
   flex-wrap: wrap;

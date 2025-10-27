@@ -6,7 +6,7 @@ const createEmptyLine = () => ({
   unitPrice: '0',
 })
 
-const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
+const PurchaseOrderForm = ({ onSubmit, isSubmitting, t = (value) => value }) => {
   const today = new Date().toISOString().split('T')[0]
   const [orderNumber, setOrderNumber] = useState('')
   const [orderDate, setOrderDate] = useState(today)
@@ -61,17 +61,17 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
     <form className="document-form" onSubmit={handleSubmit}>
       <div className="field-grid">
         <label>
-          Order number
+          {t('purchaseOrderForm.orderNumberLabel')}
           <input
             type="text"
             value={orderNumber}
             onChange={(event) => setOrderNumber(event.target.value)}
             required
-            placeholder="PO-001"
+            placeholder={t('purchaseOrderForm.orderNumberPlaceholder')}
           />
         </label>
         <label>
-          Order date
+          {t('purchaseOrderForm.orderDateLabel')}
           <input
             type="date"
             value={orderDate}
@@ -80,32 +80,32 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
           />
         </label>
         <label>
-          Supplier name
+          {t('purchaseOrderForm.supplierNameLabel')}
           <input
             type="text"
             value={supplierName}
             onChange={(event) => setSupplierName(event.target.value)}
             required
-            placeholder="Supply Co"
+            placeholder={t('purchaseOrderForm.supplierNamePlaceholder')}
           />
         </label>
       </div>
 
       <div className="form-section">
         <div className="form-section__header">
-          <h4>Order lines</h4>
+          <h4>{t('purchaseOrderForm.lineItemsHeading')}</h4>
           <button
             type="button"
             className="button button--secondary"
             onClick={addLine}
           >
-            Add line
+            {t('purchaseOrderForm.addLine')}
           </button>
         </div>
         {lines.map((line, index) => (
           <div key={index} className="line-row">
             <label>
-              Description
+              {t('purchaseOrderForm.descriptionLabel')}
               <input
                 type="text"
                 value={line.description}
@@ -113,11 +113,11 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
                   updateLine(index, 'description', event.target.value)
                 }
                 required
-                placeholder="Laptops"
+                placeholder={t('purchaseOrderForm.descriptionPlaceholder')}
               />
             </label>
             <label>
-              Quantity
+              {t('purchaseOrderForm.quantityLabel')}
               <input
                 type="number"
                 min="1"
@@ -127,7 +127,7 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
               />
             </label>
             <label>
-              Unit price
+              {t('purchaseOrderForm.unitPriceLabel')}
               <input
                 type="number"
                 min="0"
@@ -141,7 +141,7 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
               type="button"
               className="button button--icon"
               onClick={() => removeLine(index)}
-              aria-label="Remove line item"
+              aria-label={t('purchaseOrderForm.removeLine')}
               disabled={lines.length === 1}
             >
               ×
@@ -151,7 +151,7 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting }) => {
       </div>
 
       <button type="submit" className="button" disabled={isSubmitting}>
-        {isSubmitting ? 'Saving purchase order…' : 'Save purchase order'}
+        {isSubmitting ? t('purchaseOrderForm.submitting') : t('purchaseOrderForm.submit')}
       </button>
     </form>
   )
