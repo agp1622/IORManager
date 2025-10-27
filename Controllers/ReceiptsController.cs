@@ -1,6 +1,7 @@
 using IORManager.Dtos;
 using IORManager.Models;
 using IORManager.Repositories;
+using IORManager.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace IORManager.Controllers;
@@ -10,10 +11,14 @@ namespace IORManager.Controllers;
 public class ReceiptsController : ControllerBase
 {
     private readonly IFinancialDocumentRepository<Receipt> _repository;
+    private readonly IFinancialDocumentPdfService _pdfService;
 
-    public ReceiptsController(IFinancialDocumentRepository<Receipt> repository)
+    public ReceiptsController(
+        IFinancialDocumentRepository<Receipt> repository,
+        IFinancialDocumentPdfService pdfService)
     {
         _repository = repository;
+        _pdfService = pdfService;
     }
 
     [HttpGet]
@@ -37,5 +42,18 @@ public class ReceiptsController : ControllerBase
 
         var receipt = _repository.Add(request.ToReceipt());
         return CreatedAtAction(nameof(GetReceipt), new { id = receipt.Id }, receipt);
+    }
+
+    [HttpGet("{id:guid}/pdf")]
+    public ActionResult GetReceiptPdf(Guid id)
+    {
+        var receipt = _repository.GetById(id);
+        if (receipt is null)
+        {
+            return NotFound();
+        }
+
+        var pdfBytes = _pdfService.GenerateReceiptPdf(receipt);
+        return File(pdfBytes, "application/pdf", $"Receipt-{receipt.Number}.pdf");
     }
 }
