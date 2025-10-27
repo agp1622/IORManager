@@ -259,7 +259,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             }
         }
 
-        return CultureInfo.GetCultureInfo("en-US");
+        return CultureInfo.GetCultureInfo("es-DO");
     }
 
     private static NumberFormatInfo CreateCurrencyFormat(CultureInfo culture, string currencyCode)

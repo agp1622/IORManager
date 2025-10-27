@@ -82,6 +82,16 @@ const translations = {
       paymentMethodLabel: 'Method',
       paymentAmountLabel: 'Amount',
     },
+    documentList: {
+      number: 'Number',
+      date: 'Date',
+      party: 'Client',
+      total: 'Total',
+      currency: 'Currency',
+      actions: 'Actions',
+      downloadPdf: 'Download PDF',
+      downloading: 'Generating…',
+    },
     invoiceForm: {
       invoiceDateLabel: 'Invoice date',
       customerNameLabel: 'Customer name',
@@ -233,6 +243,16 @@ const translations = {
       totalLabel: 'Total',
       paymentMethodLabel: 'Método',
       paymentAmountLabel: 'Monto',
+    },
+    documentList: {
+      number: 'Número',
+      date: 'Fecha',
+      party: 'Cliente',
+      total: 'Total',
+      currency: 'Moneda',
+      actions: 'Acciones',
+      downloadPdf: 'Descargar PDF',
+      downloading: 'Generando…',
     },
     invoiceForm: {
       invoiceDateLabel: 'Fecha de la factura',

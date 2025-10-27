@@ -53,105 +53,70 @@ const createSectionConfig = (t) => ({
   },
 })
 
-const DocumentCard = ({ document, config, t, formatCurrency, formatDate }) => {
-  const lines = document.lines ?? []
-  const payments = document.payments ?? []
-  const currencyCode = document.currencyCode
-  const cultureName = document.cultureName
-  const partyName =
-    document.partyName ||
-    document.customerName ||
-    document.supplierName ||
-    '—'
-
-  const resolveUnitLabel = (code) => {
-    if (!code) {
-      return '—'
-    }
-
-    const translationKey = `units.${code}`
-    const translated = t(translationKey)
-    return translated === translationKey ? code : translated
-  }
-
+const DocumentList = ({
+  documents,
+  config,
+  t,
+  formatCurrency,
+  formatDate,
+  onDownloadPdf,
+  downloadingId,
+}) => {
   return (
-    <article className="document-card">
-      <header className="document-card__header">
-        <div>
-          <h3>{document.number}</h3>
-          <p className="document-card__date">{formatDate(document.date, cultureName)}</p>
-        </div>
-        <p className="document-card__total">
-          {formatCurrency(document.totalAmount, currencyCode, cultureName)}
-        </p>
-      </header>
-      <dl className="document-card__summary">
-        <div>
-          <dt>{config.partyLabel}</dt>
-          <dd>{partyName}</dd>
-        </div>
-        {document.referenceNumber && (
-          <div>
-            <dt>{t('documentCard.referenceLabel')}</dt>
-            <dd>{document.referenceNumber}</dd>
-          </div>
-        )}
-        <div>
-          <dt>{t('documentCard.identifierLabel')}</dt>
-          <dd>{document.id}</dd>
-        </div>
-      </dl>
+    <div className="document-table-wrapper">
+      <table className="document-table">
+        <thead>
+          <tr>
+            <th scope="col">{t('documentList.number')}</th>
+            <th scope="col">{t('documentList.date')}</th>
+            <th scope="col">{t('documentList.party')}</th>
+            <th scope="col">{t('documentList.total')}</th>
+            <th scope="col">{t('documentList.currency')}</th>
+            <th scope="col">{t('documentList.actions')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {documents.map((document) => {
+            const currencyCode = document.currencyCode
+            const cultureName = document.cultureName
+            const partyName =
+              document.partyName || document.customerName || document.supplierName || '—'
+            const isDownloading = downloadingId === document.id
 
-      {lines.length > 0 && (
-        <div className="document-card__table">
-          <h4>{t('documentCard.lineItemsHeading')}</h4>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t('documentCard.descriptionLabel')}</th>
-                <th scope="col">{t('documentCard.quantityLabel')}</th>
-                <th scope="col">{t('documentCard.unitLabel')}</th>
-                <th scope="col">{t('documentCard.unitPriceLabel')}</th>
-                <th scope="col">{t('documentCard.lineTotalLabel')}</th>
+            return (
+              <tr key={document.id}>
+                <td data-heading={t('documentList.number')}>{document.number}</td>
+                <td data-heading={t('documentList.date')}>
+                  {formatDate(document.date, cultureName)}
+                </td>
+                <td data-heading={config.partyLabel}>{partyName}</td>
+                <td data-heading={t('documentList.total')}>
+                  {formatCurrency(document.totalAmount, currencyCode, cultureName)}
+                </td>
+                <td data-heading={t('documentList.currency')}>
+                  {currencyCode || '—'}
+                </td>
+                <td
+                  data-heading={t('documentList.actions')}
+                  className="document-table__actions"
+                >
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() => onDownloadPdf(document)}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading
+                      ? t('documentList.downloading')
+                      : t('documentList.downloadPdf')}
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {lines.map((line, index) => (
-                <tr key={`${document.id}-line-${index}`}>
-                  <td>{line.description}</td>
-                  <td>{line.quantity}</td>
-                  <td>{resolveUnitLabel(line.unitOfMeasure)}</td>
-                  <td>{formatCurrency(line.unitPrice, currencyCode, cultureName)}</td>
-                  <td>{formatCurrency(line.lineTotal, currencyCode, cultureName)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {payments.length > 0 && (
-        <div className="document-card__table">
-          <h4>{t('documentCard.paymentsHeading')}</h4>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t('documentCard.paymentMethodLabel')}</th>
-                <th scope="col">{t('documentCard.paymentAmountLabel')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payments.map((payment, index) => (
-                <tr key={`${document.id}-payment-${index}`}>
-                  <td>{payment.method}</td>
-                  <td>{formatCurrency(payment.amount, currencyCode, cultureName)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </article>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -176,6 +141,7 @@ function App() {
   const [status, setStatus] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '' })
+  const [downloadingId, setDownloadingId] = useState(null)
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -407,6 +373,45 @@ function App() {
   const currentDocuments = filteredDocuments
   const config = sectionConfig[activeSection]
 
+  const handleDownloadFromList = useCallback(
+    async (doc) => {
+      const section = sectionConfig[activeSection]
+      if (!section) {
+        return
+      }
+
+      try {
+        setDownloadingId(doc.id)
+        const response = await fetch(
+          `${API_BASE_URL}/${section.endpoint}/${doc.id}/pdf`,
+        )
+
+        if (!response.ok) {
+          throw new Error(translate('pdf.downloadError'))
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = window.document.createElement('a')
+        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
+        link.href = downloadUrl
+        link.download = `${section.singular}-${safeNumber}.pdf`
+        window.document.body.appendChild(link)
+        link.click()
+        window.document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+      } catch (downloadError) {
+        setStatus({
+          type: 'error',
+          message: downloadError.message || translate('pdf.downloadError'),
+        })
+      } finally {
+        setDownloadingId(null)
+      }
+    },
+    [activeSection, sectionConfig, translate],
+  )
+
   const FormComponent = useMemo(() => {
     switch (activeSection) {
       case 'purchaseOrders':
@@ -542,18 +547,15 @@ function App() {
         ) : currentDocuments.length === 0 ? (
           <p className="muted">{config.empty}</p>
         ) : (
-          <div className="document-grid">
-            {currentDocuments.map((document) => (
-              <DocumentCard
-                key={document.id}
-                document={document}
-                config={config}
-                t={translate}
-                formatCurrency={formatCurrency}
-                formatDate={formatDate}
-              />
-            ))}
-          </div>
+          <DocumentList
+            documents={currentDocuments}
+            config={config}
+            t={translate}
+            formatCurrency={formatCurrency}
+            formatDate={formatDate}
+            onDownloadPdf={handleDownloadFromList}
+            downloadingId={downloadingId}
+          />
         )}
       </section>
 
