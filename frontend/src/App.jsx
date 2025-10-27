@@ -64,6 +64,16 @@ const DocumentCard = ({ document, config, t, formatCurrency, formatDate }) => {
     document.supplierName ||
     '—'
 
+  const resolveUnitLabel = (code) => {
+    if (!code) {
+      return '—'
+    }
+
+    const translationKey = `units.${code}`
+    const translated = t(translationKey)
+    return translated === translationKey ? code : translated
+  }
+
   return (
     <article className="document-card">
       <header className="document-card__header">
@@ -100,6 +110,7 @@ const DocumentCard = ({ document, config, t, formatCurrency, formatDate }) => {
               <tr>
                 <th scope="col">{t('documentCard.descriptionLabel')}</th>
                 <th scope="col">{t('documentCard.quantityLabel')}</th>
+                <th scope="col">{t('documentCard.unitLabel')}</th>
                 <th scope="col">{t('documentCard.unitPriceLabel')}</th>
                 <th scope="col">{t('documentCard.lineTotalLabel')}</th>
               </tr>
@@ -109,6 +120,7 @@ const DocumentCard = ({ document, config, t, formatCurrency, formatDate }) => {
                 <tr key={`${document.id}-line-${index}`}>
                   <td>{line.description}</td>
                   <td>{line.quantity}</td>
+                  <td>{resolveUnitLabel(line.unitOfMeasure)}</td>
                   <td>{formatCurrency(line.unitPrice, currencyCode, cultureName)}</td>
                   <td>{formatCurrency(line.lineTotal, currencyCode, cultureName)}</td>
                 </tr>
@@ -144,7 +156,7 @@ const DocumentCard = ({ document, config, t, formatCurrency, formatDate }) => {
 }
 
 function App() {
-  const [language, setLanguage] = useState('en')
+  const [language, setLanguage] = useState('es')
   const [defaultCurrency, setDefaultCurrency] = useState('USD')
   const translate = useMemo(() => createTranslator(language), [language])
   const locale = useMemo(
@@ -163,6 +175,7 @@ function App() {
   const [error, setError] = useState(null)
   const [status, setStatus] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '' })
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -244,6 +257,10 @@ function App() {
   }, [activeSection, loadSection])
 
   useEffect(() => {
+    setFilters({ search: '', client: '', number: '', date: '' })
+  }, [activeSection])
+
+  useEffect(() => {
     if (!status) {
       return undefined
     }
@@ -320,7 +337,74 @@ function App() {
     [loadSection, sectionConfig, translate, triggerPdfDownload],
   )
 
-  const currentDocuments = documents[activeSection] ?? []
+  const filteredDocuments = useMemo(() => {
+    const source = documents[activeSection] ?? []
+    const searchTerm = filters.search.trim().toLowerCase()
+    const clientTerm = filters.client.trim().toLowerCase()
+    const numberTerm = filters.number.trim().toLowerCase()
+    const dateTerm = filters.date
+
+    const normalizeDate = (value) => {
+      if (!value) {
+        return ''
+      }
+
+      const parsed = new Date(value)
+      if (Number.isNaN(parsed.getTime())) {
+        return String(value).slice(0, 10)
+      }
+
+      return parsed.toISOString().slice(0, 10)
+    }
+
+    if (!searchTerm && !clientTerm && !numberTerm && !dateTerm) {
+      return source
+    }
+
+    return source.filter((document) => {
+      const partyName =
+        document.partyName || document.customerName || document.supplierName || ''
+      const partyLower = partyName.toLowerCase()
+      const numberLower = (document.number || '').toLowerCase()
+      const normalizedDate = normalizeDate(document.date)
+
+      const matchesClient = !clientTerm || partyLower.includes(clientTerm)
+      const matchesNumber = !numberTerm || numberLower.includes(numberTerm)
+      const matchesDate = !dateTerm || normalizedDate === dateTerm
+
+      let matchesSearch = true
+      if (searchTerm) {
+        const searchable = [
+          numberLower,
+          partyLower,
+          (document.referenceNumber || '').toLowerCase(),
+          (document.currencyCode || '').toLowerCase(),
+          (document.id || '').toLowerCase(),
+        ]
+
+        if (Array.isArray(document.lines)) {
+          document.lines.forEach((line) => {
+            searchable.push((line.description || '').toLowerCase())
+            searchable.push(String(line.quantity ?? '').toLowerCase())
+            searchable.push((line.unitOfMeasure || '').toLowerCase())
+          })
+        }
+
+        if (Array.isArray(document.payments)) {
+          document.payments.forEach((payment) => {
+            searchable.push((payment.method || '').toLowerCase())
+            searchable.push(String(payment.amount ?? '').toLowerCase())
+          })
+        }
+
+        matchesSearch = searchable.some((value) => value && value.includes(searchTerm))
+      }
+
+      return matchesClient && matchesNumber && matchesDate && matchesSearch
+    })
+  }, [documents, activeSection, filters])
+
+  const currentDocuments = filteredDocuments
   const config = sectionConfig[activeSection]
 
   const FormComponent = useMemo(() => {
@@ -385,6 +469,62 @@ function App() {
         <div className="section-intro">
           <h2>{config.title}</h2>
           <p>{config.description}</p>
+        </div>
+
+        <div className="filter-bar" role="search">
+          <div className="filter-bar__grid">
+            <label>
+              {translate('filters.searchLabel')}
+              <input
+                type="search"
+                value={filters.search}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, search: event.target.value }))
+                }
+                placeholder={translate('filters.searchPlaceholder')}
+              />
+            </label>
+            <label>
+              {config.partyLabel}
+              <input
+                type="text"
+                value={filters.client}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, client: event.target.value }))
+                }
+                placeholder={config.partyLabel}
+              />
+            </label>
+            <label>
+              {activeSection === 'invoices'
+                ? translate('filters.numberLabel')
+                : translate('filters.genericNumberLabel')}
+              <input
+                type="text"
+                value={filters.number}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, number: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              {translate('filters.dateLabel')}
+              <input
+                type="date"
+                value={filters.date}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, date: event.target.value }))
+                }
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => setFilters({ search: '', client: '', number: '', date: '' })}
+          >
+            {translate('filters.clear')}
+          </button>
         </div>
 
         {status && (

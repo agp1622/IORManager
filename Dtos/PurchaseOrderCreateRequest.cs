@@ -49,10 +49,15 @@ public record PurchaseOrderLineRequest
     public decimal UnitPrice { get; init; }
         = 0m;
 
+    [Required]
+    [MaxLength(50)]
+    public string UnitOfMeasure { get; init; } = "unit";
+
     public DocumentLine ToDocumentLine() => new()
     {
         Description = Description,
         Quantity = Quantity,
-        UnitPrice = UnitPrice
+        UnitPrice = UnitPrice,
+        UnitOfMeasure = UnitOfMeasure
     };
 }

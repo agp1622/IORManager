@@ -1,10 +1,32 @@
 import { useState } from 'react'
 
-const createEmptyLine = () => ({
+const createEmptyLine = (unitOfMeasure = 'unit') => ({
   description: '',
   quantity: '1',
   unitPrice: '0',
+  unitOfMeasure,
 })
+
+const unitOptions = [
+  'unit',
+  'kg',
+  'g',
+  't',
+  'm',
+  'cm',
+  'mm',
+  'km',
+  'm2',
+  'm3',
+  'l',
+  'ml',
+  'lb',
+  'oz',
+  'ft',
+  'in',
+  'yd',
+  'gal',
+]
 
 const PurchaseOrderForm = ({ onSubmit, isSubmitting, t = (value) => value }) => {
   const today = new Date().toISOString().split('T')[0]
@@ -22,7 +44,10 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting, t = (value) => value }) => 
   }
 
   const addLine = () => {
-    setLines((current) => [...current, createEmptyLine()])
+    setLines((current) => {
+      const lastUnit = current[current.length - 1]?.unitOfMeasure ?? 'unit'
+      return [...current, createEmptyLine(lastUnit)]
+    })
   }
 
   const removeLine = (index) => {
@@ -44,6 +69,7 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting, t = (value) => value }) => 
         description: line.description,
         quantity: Number(line.quantity) || 0,
         unitPrice: Number(line.unitPrice) || 0,
+        unitOfMeasure: line.unitOfMeasure,
       })),
     }
 
@@ -104,10 +130,10 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting, t = (value) => value }) => 
         </div>
         {lines.map((line, index) => (
           <div key={index} className="line-row">
-            <label>
+            <label className="line-row__description">
               {t('purchaseOrderForm.descriptionLabel')}
-              <input
-                type="text"
+              <textarea
+                rows="3"
                 value={line.description}
                 onChange={(event) =>
                   updateLine(index, 'description', event.target.value)
@@ -125,6 +151,20 @@ const PurchaseOrderForm = ({ onSubmit, isSubmitting, t = (value) => value }) => 
                 onChange={(event) => updateLine(index, 'quantity', event.target.value)}
                 required
               />
+            </label>
+            <label>
+              {t('purchaseOrderForm.unitOfMeasureLabel')}
+              <select
+                value={line.unitOfMeasure}
+                onChange={(event) => updateLine(index, 'unitOfMeasure', event.target.value)}
+                required
+              >
+                {unitOptions.map((code) => (
+                  <option key={code} value={code}>
+                    {t(`units.${code}`)}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               {t('purchaseOrderForm.unitPriceLabel')}

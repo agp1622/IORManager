@@ -18,6 +18,10 @@ public class DocumentLine
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnitPrice { get; set; }
 
+    [Required]
+    [MaxLength(50)]
+    public string UnitOfMeasure { get; set; } = "unit";
+
     public Guid? InvoiceId { get; set; }
     public Invoice? Invoice { get; set; }
 

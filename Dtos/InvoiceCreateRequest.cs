@@ -18,7 +18,7 @@ public record InvoiceCreateRequest
 
     [Required]
     [RegularExpression("en-US|es-DO")]
-    public string Locale { get; init; } = "en-US";
+    public string Locale { get; init; } = "es-DO";
 
     [MinLength(1)]
     public IReadOnlyList<InvoiceLineRequest> Lines { get; init; } = Array.Empty<InvoiceLineRequest>();
@@ -53,10 +53,15 @@ public record InvoiceLineRequest
     public decimal UnitPrice { get; init; }
         = 0m;
 
+    [Required]
+    [MaxLength(50)]
+    public string UnitOfMeasure { get; init; } = "unit";
+
     public DocumentLine ToDocumentLine() => new()
     {
         Description = Description,
         Quantity = Quantity,
-        UnitPrice = UnitPrice
+        UnitPrice = UnitPrice,
+        UnitOfMeasure = UnitOfMeasure
     };
 }

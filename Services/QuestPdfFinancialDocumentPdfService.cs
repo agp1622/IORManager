@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using IORManager.Models;
@@ -34,8 +35,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 invoice.Lines,
                 invoice.TotalAmount,
                 currencyFormat,
+                resources.Culture,
                 resources.DescriptionLabel,
                 resources.QuantityLabel,
+                resources.UnitLabel,
                 resources.UnitPriceLabel,
                 resources.LineTotalLabel,
                 resources.TotalLabel),
@@ -90,8 +93,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 purchaseOrder.Lines,
                 purchaseOrder.TotalAmount,
                 currencyFormat,
+                culture,
                 Localize(culture, "Description", "Descripción"),
                 Localize(culture, "Quantity", "Cantidad"),
+                Localize(culture, "Unit", "Unidad"),
                 Localize(culture, "Unit Price", "Precio unitario"),
                 Localize(culture, "Line Total", "Subtotal"),
                 Localize(culture, "Total", "Total")),
@@ -155,8 +160,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         IReadOnlyCollection<DocumentLine> lines,
         decimal totalAmount,
         NumberFormatInfo currencyFormat,
+        CultureInfo culture,
         string descriptionLabel,
         string quantityLabel,
+        string unitLabel,
         string unitPriceLabel,
         string lineTotalLabel,
         string totalLabel)
@@ -165,7 +172,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         {
             table.ColumnsDefinition(columns =>
             {
-                columns.RelativeColumn(6);
+                columns.RelativeColumn(5);
+                columns.RelativeColumn(2);
                 columns.RelativeColumn(2);
                 columns.RelativeColumn(2);
                 columns.RelativeColumn(2);
@@ -175,6 +183,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             {
                 header.Cell().Element(HeaderCellStyle).Text(descriptionLabel);
                 header.Cell().Element(HeaderCellStyle).AlignRight().Text(quantityLabel);
+                header.Cell().Element(HeaderCellStyle).AlignRight().Text(unitLabel);
                 header.Cell().Element(HeaderCellStyle).AlignRight().Text(unitPriceLabel);
                 header.Cell().Element(HeaderCellStyle).AlignRight().Text(lineTotalLabel);
             });
@@ -183,11 +192,12 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             {
                 table.Cell().Element(CellStyle).Text(line.Description);
                 table.Cell().Element(CellStyle).AlignRight().Text(line.Quantity.ToString("N0", currencyFormat));
+                table.Cell().Element(CellStyle).AlignRight().Text(FormatUnitOfMeasure(line.UnitOfMeasure, culture));
                 table.Cell().Element(CellStyle).AlignRight().Text(FormatCurrency(line.UnitPrice, currencyFormat));
                 table.Cell().Element(CellStyle).AlignRight().Text(FormatCurrency(line.LineTotal, currencyFormat));
             }
 
-            table.Cell().ColumnSpan(3).Element(FooterCellStyle).AlignRight().Text(totalLabel);
+            table.Cell().ColumnSpan(4).Element(FooterCellStyle).AlignRight().Text(totalLabel);
             table.Cell().Element(FooterCellStyle).AlignRight().Text(FormatCurrency(totalAmount, currencyFormat));
         });
     }
@@ -276,6 +286,44 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private static string FormatCurrency(decimal amount, NumberFormatInfo currencyFormat) =>
         amount.ToString("C", currencyFormat);
 
+    private static readonly Dictionary<string, (string English, string Spanish)> UnitLabels =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "unit", ("Units", "Unidades") },
+            { "kg", ("Kilograms (kg)", "Kilogramos (kg)") },
+            { "g", ("Grams (g)", "Gramos (g)") },
+            { "t", ("Metric tons (t)", "Toneladas métricas (t)") },
+            { "m", ("Meters (m)", "Metros (m)") },
+            { "cm", ("Centimeters (cm)", "Centímetros (cm)") },
+            { "mm", ("Millimeters (mm)", "Milímetros (mm)") },
+            { "km", ("Kilometers (km)", "Kilómetros (km)") },
+            { "m2", ("Square meters (m²)", "Metros cuadrados (m²)") },
+            { "m3", ("Cubic meters (m³)", "Metros cúbicos (m³)") },
+            { "l", ("Liters (L)", "Litros (L)") },
+            { "ml", ("Milliliters (mL)", "Mililitros (mL)") },
+            { "lb", ("Pounds (lb)", "Libras (lb)") },
+            { "oz", ("Ounces (oz)", "Onzas (oz)") },
+            { "ft", ("Feet (ft)", "Pies (ft)") },
+            { "in", ("Inches (in)", "Pulgadas (in)") },
+            { "yd", ("Yards (yd)", "Yardas (yd)") },
+            { "gal", ("Gallons (gal)", "Galones (gal)") },
+        };
+
+    private static string FormatUnitOfMeasure(string? unitCode, CultureInfo culture)
+    {
+        if (string.IsNullOrWhiteSpace(unitCode))
+        {
+            return IsSpanishCulture(culture) ? "Sin especificar" : "Not specified";
+        }
+
+        if (UnitLabels.TryGetValue(unitCode, out var labels))
+        {
+            return IsSpanishCulture(culture) ? labels.Spanish : labels.English;
+        }
+
+        return unitCode;
+    }
+
     private static InvoicePdfResources GetInvoiceResources(string? cultureName)
     {
         var culture = GetCultureOrDefault(cultureName);
@@ -289,6 +337,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             isSpanish ? "Factura #" : "Invoice #",
             isSpanish ? "Descripción" : "Description",
             isSpanish ? "Cantidad" : "Quantity",
+            isSpanish ? "Unidad" : "Unit",
             isSpanish ? "Precio unitario" : "Unit Price",
             isSpanish ? "Subtotal" : "Line Total",
             isSpanish ? "Total" : "Total",
@@ -303,6 +352,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         string NumberLabel,
         string DescriptionLabel,
         string QuantityLabel,
+        string UnitLabel,
         string UnitPriceLabel,
         string LineTotalLabel,
         string TotalLabel,

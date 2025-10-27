@@ -46,6 +46,23 @@
   min-width: 180px;
 }
 
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 1rem;
+  background-color: rgba(15, 23, 42, 0.02);
+  border-radius: 1rem;
+}
+
+.filter-bar__grid {
+  flex: 1;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .section-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -275,6 +292,16 @@ textarea:focus {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 1rem;
   align-items: end;
+}
+
+.line-row__description {
+  grid-column: 1 / -1;
+}
+
+.line-row textarea {
+  width: 100%;
+  min-height: 6rem;
+  resize: vertical;
 }
 
 .button {

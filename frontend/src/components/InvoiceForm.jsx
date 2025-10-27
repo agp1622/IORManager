@@ -1,12 +1,34 @@
 import { useEffect, useState } from 'react'
 
-const createEmptyLine = () => ({
+const createEmptyLine = (unitOfMeasure = 'unit') => ({
   description: '',
   quantity: '1',
   unitPrice: '0',
+  unitOfMeasure,
 })
 
 const currencyOptions = ['USD', 'DOP']
+
+const unitOptions = [
+  'unit',
+  'kg',
+  'g',
+  't',
+  'm',
+  'cm',
+  'mm',
+  'km',
+  'm2',
+  'm3',
+  'l',
+  'ml',
+  'lb',
+  'oz',
+  'ft',
+  'in',
+  'yd',
+  'gal',
+]
 
 const InvoiceForm = ({
   onSubmit,
@@ -34,7 +56,10 @@ const InvoiceForm = ({
   }
 
   const addLine = () => {
-    setLines((current) => [...current, createEmptyLine()])
+    setLines((current) => {
+      const lastUnit = current[current.length - 1]?.unitOfMeasure ?? 'unit'
+      return [...current, createEmptyLine(lastUnit)]
+    })
   }
 
   const removeLine = (index) => {
@@ -57,6 +82,7 @@ const InvoiceForm = ({
         description: line.description,
         quantity: Number(line.quantity) || 0,
         unitPrice: Number(line.unitPrice) || 0,
+        unitOfMeasure: line.unitOfMeasure,
       })),
     }
 
@@ -121,10 +147,10 @@ const InvoiceForm = ({
         </div>
         {lines.map((line, index) => (
           <div key={index} className="line-row">
-            <label>
+            <label className="line-row__description">
               {t('invoiceForm.descriptionLabel')}
-              <input
-                type="text"
+              <textarea
+                rows="3"
                 value={line.description}
                 onChange={(event) =>
                   updateLine(index, 'description', event.target.value)
@@ -142,6 +168,20 @@ const InvoiceForm = ({
                 onChange={(event) => updateLine(index, 'quantity', event.target.value)}
                 required
               />
+            </label>
+            <label>
+              {t('invoiceForm.unitOfMeasureLabel')}
+              <select
+                value={line.unitOfMeasure}
+                onChange={(event) => updateLine(index, 'unitOfMeasure', event.target.value)}
+                required
+              >
+                {unitOptions.map((code) => (
+                  <option key={code} value={code}>
+                    {t(`units.${code}`)}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               {t('invoiceForm.unitPriceLabel')}
