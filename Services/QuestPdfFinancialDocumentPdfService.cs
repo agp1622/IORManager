@@ -50,24 +50,24 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
 
         var headerItems = new[]
         {
-            $"{Localize(culture, \"Date\", \"Fecha\")}: {receipt.Date.ToString("d", culture)}",
-            $"{Localize(culture, \"Customer\", \"Cliente\")}: {receipt.CustomerName}",
-            $"{Localize(culture, \"Reference\", \"Referencia\")}: {receipt.ReferenceNumber ?? "-"}"
+            $"{Localize(culture, "Date", "Fecha")}: {receipt.Date.ToString("d", culture)}",
+            $"{Localize(culture, "Customer", "Cliente")}: {receipt.CustomerName}",
+            $"{Localize(culture, "Reference", "Referencia")}: {receipt.ReferenceNumber ?? "-"}"
         };
 
         return CreateDocument(
-            title: $"{Localize(culture, \"Receipt\", \"Recibo\")} {receipt.Number}",
+            title: $"{Localize(culture, "Receipt", "Recibo")} {receipt.Number}",
             headerItems: headerItems,
             content: container => ComposeReceiptPayments(
                 container,
                 receipt.Payments,
                 receipt.TotalAmount,
                 currencyFormat,
-                Localize(culture, \"Payment Method\", \"Método de pago\"),
-                Localize(culture, \"Amount\", \"Monto\"),
-                Localize(culture, \"Total\", \"Total\")),
+                Localize(culture, "Payment Method", "Método de pago"),
+                Localize(culture, "Amount", "Monto"),
+                Localize(culture, "Total", "Total")),
             culture: culture,
-            footerLabel: Localize(culture, \"Generated on \", \"Generado el \"));
+            footerLabel: Localize(culture, "Generated on ", "Generado el "));
     }
 
     public byte[] GeneratePurchaseOrderPdf(PurchaseOrder purchaseOrder)
@@ -77,26 +77,26 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
 
         var headerItems = new[]
         {
-            $"{Localize(culture, \"Date\", \"Fecha\")}: {purchaseOrder.Date.ToString("d", culture)}",
-            $"{Localize(culture, \"Supplier\", \"Proveedor\")}: {purchaseOrder.SupplierName}",
-            $"{Localize(culture, \"PO #\", \"OC #\")}: {purchaseOrder.Number}"
+            $"{Localize(culture, "Date", "Fecha")}: {purchaseOrder.Date.ToString("d", culture)}",
+            $"{Localize(culture, "Supplier", "Proveedor")}: {purchaseOrder.SupplierName}",
+            $"{Localize(culture, "PO #", "OC #")}: {purchaseOrder.Number}"
         };
 
         return CreateDocument(
-            title: $"{Localize(culture, \"Purchase Order\", \"Orden de compra\")} {purchaseOrder.Number}",
+            title: $"{Localize(culture, "Purchase Order", "Orden de compra")} {purchaseOrder.Number}",
             headerItems: headerItems,
             content: container => ComposeDocumentLines(
                 container,
                 purchaseOrder.Lines,
                 purchaseOrder.TotalAmount,
                 currencyFormat,
-                Localize(culture, \"Description\", \"Descripción\"),
-                Localize(culture, \"Quantity\", \"Cantidad\"),
-                Localize(culture, \"Unit Price\", \"Precio unitario\"),
-                Localize(culture, \"Line Total\", \"Subtotal\"),
-                Localize(culture, \"Total\", \"Total\")),
+                Localize(culture, "Description", "Descripción"),
+                Localize(culture, "Quantity", "Cantidad"),
+                Localize(culture, "Unit Price", "Precio unitario"),
+                Localize(culture, "Line Total", "Subtotal"),
+                Localize(culture, "Total", "Total")),
             culture: culture,
-            footerLabel: Localize(culture, \"Generated on \", \"Generado el \"));
+            footerLabel: Localize(culture, "Generated on ", "Generado el "));
     }
 
     private static byte[] CreateDocument(

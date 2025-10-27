@@ -3,6 +3,7 @@ using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 
 namespace IORManager;
 
@@ -14,7 +15,10 @@ public class Program
 
         // Add services to the container.
 
-        builder.Services.AddControllers();
+        builder.Services.AddControllers()
+            // Avoid JSON serializer errors when EF navigation properties create object reference cycles
+            // (e.g., Invoice -> Lines -> Invoice). Ignore cycles so repeated references are omitted.
+            .AddJsonOptions(opts => opts.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
         const string corsPolicyName = "AllowFrontend";
         builder.Services.AddCors(options =>
         {
