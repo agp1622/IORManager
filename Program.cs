@@ -1,6 +1,7 @@
 using IORManager.Data;
 using IORManager.Models;
 using IORManager.Repositories;
+using IORManager.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace IORManager;
@@ -26,6 +27,8 @@ public class Program
         });
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
+
+        builder.Services.AddSingleton<IFinancialDocumentPdfService, QuestPdfFinancialDocumentPdfService>();
 
         builder.Services.AddDbContext<IORManagerContext>(options =>
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

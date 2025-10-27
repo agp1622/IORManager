@@ -1,6 +1,7 @@
 using IORManager.Dtos;
 using IORManager.Models;
 using IORManager.Repositories;
+using IORManager.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace IORManager.Controllers;
@@ -10,10 +11,14 @@ namespace IORManager.Controllers;
 public class PurchaseOrdersController : ControllerBase
 {
     private readonly IFinancialDocumentRepository<PurchaseOrder> _repository;
+    private readonly IFinancialDocumentPdfService _pdfService;
 
-    public PurchaseOrdersController(IFinancialDocumentRepository<PurchaseOrder> repository)
+    public PurchaseOrdersController(
+        IFinancialDocumentRepository<PurchaseOrder> repository,
+        IFinancialDocumentPdfService pdfService)
     {
         _repository = repository;
+        _pdfService = pdfService;
     }
 
     [HttpGet]
@@ -37,5 +42,18 @@ public class PurchaseOrdersController : ControllerBase
 
         var purchaseOrder = _repository.Add(request.ToPurchaseOrder());
         return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, purchaseOrder);
+    }
+
+    [HttpGet("{id:guid}/pdf")]
+    public ActionResult GetPurchaseOrderPdf(Guid id)
+    {
+        var purchaseOrder = _repository.GetById(id);
+        if (purchaseOrder is null)
+        {
+            return NotFound();
+        }
+
+        var pdfBytes = _pdfService.GeneratePurchaseOrderPdf(purchaseOrder);
+        return File(pdfBytes, "application/pdf", $"PurchaseOrder-{purchaseOrder.Number}.pdf");
     }
 }
