@@ -6,14 +6,19 @@ namespace IORManager.Dtos;
 public record InvoiceCreateRequest
 {
     [Required]
-    public string InvoiceNumber { get; init; } = string.Empty;
-
-    [Required]
     public DateOnly InvoiceDate { get; init; }
         = DateOnly.FromDateTime(DateTime.UtcNow);
 
     [Required]
     public string CustomerName { get; init; } = string.Empty;
+
+    [Required]
+    [RegularExpression("USD|DOP")]
+    public string CurrencyCode { get; init; } = "USD";
+
+    [Required]
+    [RegularExpression("en-US|es-DO")]
+    public string Locale { get; init; } = "en-US";
 
     [MinLength(1)]
     public IReadOnlyList<InvoiceLineRequest> Lines { get; init; } = Array.Empty<InvoiceLineRequest>();
@@ -23,9 +28,10 @@ public record InvoiceCreateRequest
         var invoice = new Invoice
         {
             Id = Guid.NewGuid(),
-            Number = InvoiceNumber,
             Date = InvoiceDate,
             CustomerName = CustomerName,
+            CurrencyCode = CurrencyCode,
+            CultureName = Locale,
             Lines = Lines.Select(line => line.ToDocumentLine()).ToList()
         };
 

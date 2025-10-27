@@ -14,6 +14,14 @@ public abstract class FinancialDocument
     public DateOnly Date { get; set; }
 
     [Required]
+    [MaxLength(3)]
+    public string CurrencyCode { get; set; } = "USD";
+
+    [Required]
+    [MaxLength(10)]
+    public string CultureName { get; set; } = "en-US";
+
+    [Required]
     [MaxLength(200)]
     public string PartyName { get; set; } = string.Empty;
 

@@ -29,6 +29,7 @@ public class Program
         builder.Services.AddSwaggerGen();
 
         builder.Services.AddSingleton<IFinancialDocumentPdfService, QuestPdfFinancialDocumentPdfService>();
+        builder.Services.AddScoped<IInvoiceNumberGenerator, InvoiceNumberGenerator>();
 
         builder.Services.AddDbContext<IORManagerContext>(options =>
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

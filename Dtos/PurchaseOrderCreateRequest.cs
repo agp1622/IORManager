@@ -26,6 +26,8 @@ public record PurchaseOrderCreateRequest
             Number = PurchaseOrderNumber,
             Date = PurchaseOrderDate,
             SupplierName = SupplierName,
+            CurrencyCode = "USD",
+            CultureName = "en-US",
             Lines = Lines.Select(line => line.ToDocumentLine()).ToList()
         };
 

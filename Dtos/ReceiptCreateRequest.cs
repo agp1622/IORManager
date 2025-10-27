@@ -30,6 +30,8 @@ public record ReceiptCreateRequest
             Date = ReceiptDate,
             CustomerName = CustomerName,
             ReferenceNumber = ReferenceNumber,
+            CurrencyCode = "USD",
+            CultureName = "en-US",
             Payments = Payments.Select(payment => payment.ToReceiptPayment()).ToList()
         };
 

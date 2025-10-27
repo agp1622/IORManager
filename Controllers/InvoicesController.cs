@@ -12,13 +12,16 @@ public class InvoicesController : ControllerBase
 {
     private readonly IFinancialDocumentRepository<Invoice> _repository;
     private readonly IFinancialDocumentPdfService _pdfService;
+    private readonly IInvoiceNumberGenerator _numberGenerator;
 
     public InvoicesController(
         IFinancialDocumentRepository<Invoice> repository,
-        IFinancialDocumentPdfService pdfService)
+        IFinancialDocumentPdfService pdfService,
+        IInvoiceNumberGenerator numberGenerator)
     {
         _repository = repository;
         _pdfService = pdfService;
+        _numberGenerator = numberGenerator;
     }
 
     [HttpGet]
@@ -33,15 +36,24 @@ public class InvoicesController : ControllerBase
     }
 
     [HttpPost]
-    public ActionResult<Invoice> CreateInvoice([FromBody] InvoiceCreateRequest request)
+    public ActionResult<InvoiceCreateResponse> CreateInvoice([FromBody] InvoiceCreateRequest request)
     {
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
         }
 
-        var invoice = _repository.Add(request.ToInvoice());
-        return CreatedAtAction(nameof(GetInvoice), new { id = invoice.Id }, invoice);
+        var invoice = request.ToInvoice();
+        invoice.Number = _numberGenerator.GenerateNextNumber();
+
+        var savedInvoice = _repository.Add(invoice);
+        var pdfBytes = _pdfService.GenerateInvoicePdf(savedInvoice);
+        var response = new InvoiceCreateResponse(
+            savedInvoice,
+            $"Invoice-{savedInvoice.Number}.pdf",
+            Convert.ToBase64String(pdfBytes));
+
+        return CreatedAtAction(nameof(GetInvoice), new { id = savedInvoice.Id }, response);
     }
 
     [HttpGet("{id:guid}/pdf")]

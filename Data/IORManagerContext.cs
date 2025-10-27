@@ -17,6 +17,7 @@ public class IORManagerContext : DbContext
     public DbSet<Receipt> Receipts => Set<Receipt>();
     public DbSet<DocumentLine> DocumentLines => Set<DocumentLine>();
     public DbSet<ReceiptPayment> ReceiptPayments => Set<ReceiptPayment>();
+    public DbSet<InvoiceNumberSequence> InvoiceNumberSequences => Set<InvoiceNumberSequence>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -25,6 +26,7 @@ public class IORManagerContext : DbContext
         ConfigureFinancialDocuments(modelBuilder);
         ConfigureDocumentLines(modelBuilder);
         ConfigureReceipts(modelBuilder);
+        ConfigureInvoiceNumberSequence(modelBuilder);
     }
 
     private static void ConfigureFinancialDocuments(ModelBuilder modelBuilder)
@@ -79,6 +81,16 @@ public class IORManagerContext : DbContext
                 .WithOne(payment => payment.Receipt)
                 .HasForeignKey(payment => payment.ReceiptId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureInvoiceNumberSequence(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<InvoiceNumberSequence>(builder =>
+        {
+            builder.HasKey(sequence => sequence.Id);
+            builder.Property(sequence => sequence.Id).ValueGeneratedNever();
+            builder.HasData(new InvoiceNumberSequence { Id = 1, NextNumber = 1 });
         });
     }
 }
