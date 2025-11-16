@@ -4,9 +4,28 @@ import PurchaseOrderForm from './components/PurchaseOrderForm'
 import ReceiptForm from './components/ReceiptForm'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
+import PapavelagLogo from './assets/papavelag-logo.svg'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5031/api'
 const CURRENCY_CODES = ['USD', 'DOP']
+
+const BRAND_NOTES = {
+  invoices: 'Facturas digitales con identidad luminosa y profesional.',
+  purchaseOrders: 'Órdenes de compra claras que reflejan nuestra tecnología.',
+  receipts: 'Recibos elegantes que transmiten confianza y precisión.',
+  default: 'Documentos oficiales con el sello PAPAVELAG.',
+}
+
+const BrandPanel = ({ note, variant = 'default' }) => (
+  <div className={`brand-panel ${variant === 'compact' ? 'brand-panel--compact' : ''}`}>
+    <img src={PapavelagLogo} alt="Papavelag Technologies logo" className="brand-panel__logo" />
+    <div className="brand-panel__text">
+      <p className="brand-panel__name">PAPAVELAG</p>
+      <p className="brand-panel__tagline">Technologies Y Soluciones S.R.L.</p>
+      <p className="brand-panel__note">{note}</p>
+    </div>
+  </div>
+)
 
 const createSectionConfig = (t) => ({
   invoices: {
@@ -372,6 +391,10 @@ function App() {
 
   const currentDocuments = filteredDocuments
   const config = sectionConfig[activeSection]
+  const brandNote =
+    BRAND_NOTES[activeSection] ??
+    BRAND_NOTES.default ??
+    `Documentos ${config?.singular?.toLowerCase?.() ?? 'corporativos'} con el sello PAPAVELAG.`
 
   const handleDownloadFromList = useCallback(
     async (doc) => {
@@ -427,6 +450,11 @@ function App() {
   return (
     <div className="layout">
       <header className="page-header">
+        <img
+          src={PapavelagLogo}
+          alt="Papavelag Technologies logo"
+          className="page-header__logo"
+        />
         <h1>{translate('app.title')}</h1>
         <p className="page-header__subtitle">{translate('app.subtitle')}</p>
       </header>
@@ -475,6 +503,7 @@ function App() {
           <h2>{config.title}</h2>
           <p>{config.description}</p>
         </div>
+        <BrandPanel note={brandNote} variant="compact" />
 
         <div className="filter-bar" role="search">
           <div className="filter-bar__grid">
@@ -564,6 +593,7 @@ function App() {
           <h2>{config.createHeading}</h2>
           <p>{config.createDescription}</p>
         </div>
+        <BrandPanel note={brandNote} />
 
         <FormComponent
           onSubmit={(payload) => handleCreate(activeSection, payload)}
