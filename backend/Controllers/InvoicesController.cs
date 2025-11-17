@@ -47,10 +47,10 @@ public class InvoicesController : ControllerBase
         invoice.Number = _numberGenerator.GenerateNextNumber();
 
         var savedInvoice = _repository.Add(invoice);
-        var pdfBytes = _pdfService.GenerateInvoicePdf(savedInvoice);
+        var pdfBytes = _pdfService.GenerateQuotePdf(savedInvoice);
         var response = new InvoiceCreateResponse(
             savedInvoice,
-            $"Invoice-{savedInvoice.Number}.pdf",
+            $"Quote-{savedInvoice.Number}.pdf",
             Convert.ToBase64String(pdfBytes));
 
         return CreatedAtAction(nameof(GetInvoice), new { id = savedInvoice.Id }, response);
@@ -58,6 +58,19 @@ public class InvoicesController : ControllerBase
 
     [HttpGet("{id:guid}/pdf")]
     public ActionResult GetInvoicePdf(Guid id)
+    {
+        var invoice = _repository.GetById(id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        var pdfBytes = _pdfService.GenerateQuotePdf(invoice);
+        return File(pdfBytes, "application/pdf", $"Quote-{invoice.Number}.pdf");
+    }
+
+    [HttpGet("{id:guid}/invoice-pdf")]
+    public ActionResult GetInvoiceDocumentPdf(Guid id)
     {
         var invoice = _repository.GetById(id);
         if (invoice is null)

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import InvoiceForm from './components/InvoiceForm'
-import PurchaseOrderForm from './components/PurchaseOrderForm'
 import ReceiptForm from './components/ReceiptForm'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
@@ -10,8 +9,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5031
 const CURRENCY_CODES = ['USD', 'DOP']
 
 const BRAND_NOTES = {
-  invoices: 'Facturas digitales con identidad luminosa y profesional.',
-  purchaseOrders: 'Órdenes de compra claras que reflejan nuestra tecnología.',
+  quotes: 'Cotizaciones impactantes listas para convertirse en facturas.',
   receipts: 'Recibos elegantes que transmiten confianza y precisión.',
   default: 'Documentos oficiales con el sello PAPAVELAG.',
 }
@@ -28,33 +26,19 @@ const BrandPanel = ({ note, variant = 'default' }) => (
 )
 
 const createSectionConfig = (t) => ({
-  invoices: {
-    title: t('sections.invoices.title'),
-    description: t('sections.invoices.description'),
+  quotes: {
+    title: t('sections.quotes.title'),
+    description: t('sections.quotes.description'),
     endpoint: 'Invoices',
-    singular: t('sections.invoices.singular'),
-    partyLabel: t('sections.invoices.partyLabel'),
-    loading: t('sections.invoices.loading'),
-    empty: t('sections.invoices.empty'),
-    loadError: t('sections.invoices.loadError'),
-    createHeading: t('sections.invoices.createHeading'),
-    createDescription: t('sections.invoices.createDescription'),
-    createSuccess: t('sections.invoices.createSuccess'),
-    createError: t('sections.invoices.createError'),
-  },
-  purchaseOrders: {
-    title: t('sections.purchaseOrders.title'),
-    description: t('sections.purchaseOrders.description'),
-    endpoint: 'PurchaseOrders',
-    singular: t('sections.purchaseOrders.singular'),
-    partyLabel: t('sections.purchaseOrders.partyLabel'),
-    loading: t('sections.purchaseOrders.loading'),
-    empty: t('sections.purchaseOrders.empty'),
-    loadError: t('sections.purchaseOrders.loadError'),
-    createHeading: t('sections.purchaseOrders.createHeading'),
-    createDescription: t('sections.purchaseOrders.createDescription'),
-    createSuccess: t('sections.purchaseOrders.createSuccess'),
-    createError: t('sections.purchaseOrders.createError'),
+    singular: t('sections.quotes.singular'),
+    partyLabel: t('sections.quotes.partyLabel'),
+    loading: t('sections.quotes.loading'),
+    empty: t('sections.quotes.empty'),
+    loadError: t('sections.quotes.loadError'),
+    createHeading: t('sections.quotes.createHeading'),
+    createDescription: t('sections.quotes.createDescription'),
+    createSuccess: t('sections.quotes.createSuccess'),
+    createError: t('sections.quotes.createError'),
   },
   receipts: {
     title: t('sections.receipts.title'),
@@ -80,6 +64,7 @@ const DocumentList = ({
   formatDate,
   onDownloadPdf,
   downloadingId,
+  secondaryAction = null,
 }) => {
   return (
     <div className="document-table-wrapper">
@@ -115,10 +100,7 @@ const DocumentList = ({
                 <td data-heading={t('documentList.currency')}>
                   {currencyCode || '—'}
                 </td>
-                <td
-                  data-heading={t('documentList.actions')}
-                  className="document-table__actions"
-                >
+                <td data-heading={t('documentList.actions')} className="document-table__actions">
                   <button
                     type="button"
                     className="button button--secondary"
@@ -129,6 +111,18 @@ const DocumentList = ({
                       ? t('documentList.downloading')
                       : t('documentList.downloadPdf')}
                   </button>
+                  {secondaryAction && (
+                    <button
+                      type="button"
+                      className="button button--primary"
+                      onClick={() => secondaryAction.onClick(document)}
+                      disabled={secondaryAction.busyId === document.id}
+                    >
+                      {secondaryAction.busyId === document.id
+                        ? secondaryAction.loadingLabel
+                        : secondaryAction.label}
+                    </button>
+                  )}
                 </td>
               </tr>
             )
@@ -149,10 +143,9 @@ function App() {
   )
   const sectionConfig = useMemo(() => createSectionConfig(translate), [translate])
 
-  const [activeSection, setActiveSection] = useState('invoices')
+  const [activeSection, setActiveSection] = useState('quotes')
   const [documents, setDocuments] = useState({
-    invoices: [],
-    purchaseOrders: [],
+    quotes: [],
     receipts: [],
   })
   const [loading, setLoading] = useState(false)
@@ -161,6 +154,7 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '' })
   const [downloadingId, setDownloadingId] = useState(null)
+  const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -294,7 +288,7 @@ function App() {
         }
 
         let downloadSucceeded = true
-        if (sectionKey === 'invoices' && responseBody?.pdfBase64) {
+        if (sectionKey === 'quotes' && responseBody?.pdfBase64) {
           try {
             triggerPdfDownload(responseBody.pdfFileName, responseBody.pdfBase64)
           } catch (downloadError) {
@@ -435,17 +429,53 @@ function App() {
     [activeSection, sectionConfig, translate],
   )
 
-  const FormComponent = useMemo(() => {
-    switch (activeSection) {
-      case 'purchaseOrders':
-        return PurchaseOrderForm
-      case 'receipts':
-        return ReceiptForm
-      case 'invoices':
-      default:
-        return InvoiceForm
-    }
-  }, [activeSection])
+  const handleGenerateInvoice = useCallback(
+    async (doc) => {
+      const quotesConfig = sectionConfig.quotes
+      if (!quotesConfig) {
+        return
+      }
+
+      try {
+        setInvoiceGeneratingId(doc.id)
+        const response = await fetch(
+          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-pdf`,
+        )
+
+        if (!response.ok) {
+          throw new Error(translate('pdf.invoiceDownloadError'))
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = window.document.createElement('a')
+        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
+        link.href = downloadUrl
+        link.download = `Invoice-${safeNumber}.pdf`
+        window.document.body.appendChild(link)
+        link.click()
+        window.document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+        setStatus({
+          type: 'success',
+          message: translate('pdf.invoiceGenerated'),
+        })
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('pdf.invoiceDownloadError'),
+        })
+      } finally {
+        setInvoiceGeneratingId(null)
+      }
+    },
+    [sectionConfig, translate],
+  )
+
+  const FormComponent = useMemo(
+    () => (activeSection === 'receipts' ? ReceiptForm : InvoiceForm),
+    [activeSection],
+  )
 
   return (
     <div className="layout">
@@ -530,7 +560,7 @@ function App() {
               />
             </label>
             <label>
-              {activeSection === 'invoices'
+              {activeSection === 'quotes'
                 ? translate('filters.numberLabel')
                 : translate('filters.genericNumberLabel')}
               <input
@@ -584,6 +614,16 @@ function App() {
             formatDate={formatDate}
             onDownloadPdf={handleDownloadFromList}
             downloadingId={downloadingId}
+            secondaryAction={
+              activeSection === 'quotes'
+                ? {
+                    label: translate('documentList.generateInvoice'),
+                    loadingLabel: translate('documentList.generatingInvoice'),
+                    busyId: invoiceGeneratingId,
+                    onClick: handleGenerateInvoice,
+                  }
+                : null
+            }
           />
         )}
       </section>
@@ -599,7 +639,7 @@ function App() {
           onSubmit={(payload) => handleCreate(activeSection, payload)}
           isSubmitting={isSubmitting}
           t={translate}
-          {...(activeSection === 'invoices' ? { defaultCurrency, locale } : {})}
+        {...(activeSection === 'quotes' ? { defaultCurrency, locale } : {})}
         />
       </section>
     </div>

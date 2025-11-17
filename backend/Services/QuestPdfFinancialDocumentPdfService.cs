@@ -35,16 +35,23 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         "ariaspavel2@gmail.com"
     };
 
-    private static readonly Lazy<SvgImage?> BrandLogo = new(LoadBrandLogo);
+    private static readonly Lazy<Image?> BrandRasterLogo = new(LoadRasterLogo);
+    private static readonly Lazy<SvgImage?> BrandVectorLogo = new(LoadVectorLogo);
 
     static QuestPdfFinancialDocumentPdfService()
     {
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
-    public byte[] GenerateInvoicePdf(Invoice invoice)
+    public byte[] GenerateQuotePdf(Invoice invoice) =>
+        GenerateInvoiceDocument(invoice, isQuote: true);
+
+    public byte[] GenerateInvoicePdf(Invoice invoice) =>
+        GenerateInvoiceDocument(invoice, isQuote: false);
+
+    private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote)
     {
-        var resources = GetInvoiceResources(invoice.CultureName);
+        var resources = GetInvoiceResources(invoice.CultureName, isQuote);
         var culture = resources.Culture;
         var currencyFormat = CreateCurrencyFormat(culture, invoice.CurrencyCode);
         var metadata = new List<(string Label, string Value)>
@@ -59,9 +66,13 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             (Localize(culture, "Phone", "Teléfono"), GetPlaceholderValue(culture))
         };
 
+        var subtotalLabel = isQuote
+            ? Localize(culture, "Quote Subtotal", "Subtotal de cotización")
+            : Localize(culture, "Invoice Subtotal", "Subtotal de factura");
+
         var totals = new List<(string Label, string Value)>
         {
-            (Localize(culture, "Invoice Subtotal", "Subtotal de factura"), FormatCurrency(invoice.TotalAmount, currencyFormat)),
+            (subtotalLabel, FormatCurrency(invoice.TotalAmount, currencyFormat)),
             (Localize(culture, "Tax Rate", "Tasa de impuesto"), "0.00%"),
             (Localize(culture, "Sales Tax", "Impuesto"), FormatCurrency(0, currencyFormat)),
             (Localize(culture, "Deposit Received", "Depósito recibido"), FormatCurrency(0, currencyFormat)),
@@ -217,9 +228,13 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                         column.Item().Element(totalContainer => ComposeTotals(totalContainer, totals));
                     }
 
+                });
+
+                page.Footer().Element(footerContainer =>
+                {
                     if (footerNotes.Count > 0)
                     {
-                        column.Item().Element(footerContainer => ComposeFooterNotes(footerContainer, footerNotes));
+                        ComposeFooterNotes(footerContainer, footerNotes);
                     }
                 });
             });
@@ -235,7 +250,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         string documentTypeLabel,
         IReadOnlyCollection<(string Label, string Value)> metadata)
     {
-        var logo = BrandLogo.Value;
+        var rasterLogo = BrandRasterLogo.Value;
+        var vectorLogo = BrandVectorLogo.Value;
 
         container
             .Background(HeaderBackgroundColor)
@@ -246,11 +262,15 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             {
                 row.RelativeItem().Row(brandRow =>
                 {
-                    brandRow.ConstantItem(80).Height(80).Element(logoContainer =>
+                    brandRow.ConstantItem(130).Height(130).Element(logoContainer =>
                     {
-                        if (logo is not null)
+                        if (rasterLogo is not null)
                         {
-                            logoContainer.Svg(logo);
+                            logoContainer.Image(rasterLogo).FitHeight();
+                        }
+                        else if (vectorLogo is not null)
+                        {
+                            logoContainer.Svg(vectorLogo);
                         }
                         else
                         {
@@ -350,7 +370,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 {
                     column.Item().Row(row =>
                     {
-                        row.ConstantItem(65).Text($"{entry.Label}:").SemiBold().FontColor(SecondaryTextColor);
+                        row.ConstantItem(110).Text($"{entry.Label}:").SemiBold().FontColor(SecondaryTextColor);
                         row.RelativeItem().Text(string.IsNullOrWhiteSpace(entry.Value) ? "-" : entry.Value);
                     });
                 }
@@ -392,14 +412,18 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         IReadOnlyCollection<string> footerNotes)
     {
         container
+            .PaddingTop(8)
+            .PaddingBottom(8)
             .AlignCenter()
-            .PaddingTop(12)
             .Column(column =>
             {
                 column.Spacing(3);
                 foreach (var note in footerNotes)
                 {
-                    column.Item().AlignCenter().Text(note).FontColor(SecondaryTextColor);
+                    column.Item()
+                        .AlignCenter()
+                        .Text(note)
+                        .FontColor(SecondaryTextColor);
                 }
             });
     }
@@ -420,12 +444,12 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         {
             table.ColumnsDefinition(columns =>
             {
-                columns.RelativeColumn(1);
-                columns.RelativeColumn(5);
-                columns.RelativeColumn(2);
-                columns.RelativeColumn(2);
-                columns.RelativeColumn(2);
-                columns.RelativeColumn(2);
+                columns.RelativeColumn(1.1f);
+                columns.RelativeColumn(5.8f);
+                columns.RelativeColumn(1.3f);
+                columns.RelativeColumn(1.6f);
+                columns.RelativeColumn(1.6f);
+                columns.RelativeColumn(1.8f);
             });
 
             table.Header(header =>
@@ -595,7 +619,20 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 "ariaspavel2@gmail.com"
             };
 
-    private static SvgImage? LoadBrandLogo()
+    private static Image? LoadRasterLogo()
+    {
+        try
+        {
+            var pngPath = Path.Combine(AppContext.BaseDirectory, "Assets", "papavelag-logo.png");
+            return File.Exists(pngPath) ? Image.FromFile(pngPath) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static SvgImage? LoadVectorLogo()
     {
         try
         {
@@ -631,17 +668,23 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             { "gal", ("Gallons (gal)", "Galones (gal)") },
         };
 
-    private static InvoicePdfResources GetInvoiceResources(string? cultureName)
+    private static InvoicePdfResources GetInvoiceResources(string? cultureName, bool asQuote)
     {
         var culture = GetCultureOrDefault(cultureName);
         var isSpanish = IsSpanishCulture(culture);
 
+        var title = asQuote
+            ? (isSpanish ? "Cotización" : "Quote")
+            : (isSpanish ? "Factura" : "Invoice");
+        var numberLabel = asQuote
+            ? (isSpanish ? "Cotización #" : "Quote #")
+            : (isSpanish ? "Factura #" : "Invoice #");
         return new InvoicePdfResources(
             culture,
-            isSpanish ? "Cotización" : "Quote",
+            title,
             isSpanish ? "Fecha" : "Date",
             isSpanish ? "Cliente" : "Customer",
-            isSpanish ? "Cotización #" : "Quote #",
+            numberLabel,
             isSpanish ? "Descripción" : "Description",
             isSpanish ? "Cantidad" : "Quantity",
             isSpanish ? "Precio unitario" : "Unit Price",
