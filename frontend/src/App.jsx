@@ -14,6 +14,17 @@ const BRAND_NOTES = {
   default: 'Documentos oficiales con el sello PAPAVELAG.',
 }
 
+const getInitialTheme = () => {
+  if (typeof window === 'undefined') {
+    return 'light'
+  }
+  const stored = window.localStorage.getItem('ior-theme')
+  if (stored === 'light' || stored === 'dark') {
+    return stored
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
 const BrandPanel = ({ note, variant = 'default' }) => (
   <div className={`brand-panel ${variant === 'compact' ? 'brand-panel--compact' : ''}`}>
     <img src={PapavelagLogo} alt="Papavelag Technologies logo" className="brand-panel__logo" />
@@ -64,18 +75,60 @@ const DocumentList = ({
   formatDate,
   onDownloadPdf,
   downloadingId,
-  secondaryAction = null,
+  extraActions = [],
+  sortConfig,
+  onSort,
 }) => {
+  const getAriaSort = (key) => {
+    if (!sortConfig || sortConfig.key !== key) {
+      return 'none'
+    }
+    return sortConfig.direction === 'asc' ? 'ascending' : 'descending'
+  }
+
+  const renderSortButton = (label, key) => {
+    if (!onSort) {
+      return label
+    }
+
+    const isActive = sortConfig?.key === key
+    const direction = sortConfig?.direction === 'desc' ? '▼' : '▲'
+
+    return (
+      <button
+        type="button"
+        className={`table-sort ${isActive ? 'is-active' : ''}`}
+        onClick={() => onSort(key)}
+        aria-pressed={isActive}
+      >
+        <span>{label}</span>
+        <span aria-hidden="true" className="table-sort__icon">
+          {isActive ? direction : '↕'}
+        </span>
+      </button>
+    )
+  }
+
   return (
     <div className="document-table-wrapper">
       <table className="document-table">
         <thead>
           <tr>
-            <th scope="col">{t('documentList.number')}</th>
-            <th scope="col">{t('documentList.date')}</th>
-            <th scope="col">{t('documentList.party')}</th>
-            <th scope="col">{t('documentList.total')}</th>
-            <th scope="col">{t('documentList.currency')}</th>
+            <th scope="col" aria-sort={getAriaSort('number')}>
+              {renderSortButton(t('documentList.number'), 'number')}
+            </th>
+            <th scope="col" aria-sort={getAriaSort('date')}>
+              {renderSortButton(t('documentList.date'), 'date')}
+            </th>
+            <th scope="col" aria-sort={getAriaSort('party')}>
+              {renderSortButton(t('documentList.party'), 'party')}
+            </th>
+            <th scope="col" aria-sort={getAriaSort('total')}>
+              {renderSortButton(t('documentList.total'), 'total')}
+            </th>
+            <th scope="col" aria-sort={getAriaSort('currency')}>
+              {renderSortButton(t('documentList.currency'), 'currency')}
+            </th>
             <th scope="col">{t('documentList.actions')}</th>
           </tr>
         </thead>
@@ -111,18 +164,19 @@ const DocumentList = ({
                       ? t('documentList.downloading')
                       : t('documentList.downloadPdf')}
                   </button>
-                  {secondaryAction && (
+                  {extraActions.map((action, index) => (
                     <button
+                      key={`${action.label}-${index}`}
                       type="button"
-                      className="button button--primary"
-                      onClick={() => secondaryAction.onClick(document)}
-                      disabled={secondaryAction.busyId === document.id}
+                      className={`button ${action.variant ?? ''}`}
+                      onClick={() => action.onClick(document)}
+                      disabled={action.busyId === document.id}
                     >
-                      {secondaryAction.busyId === document.id
-                        ? secondaryAction.loadingLabel
-                        : secondaryAction.label}
+                      {action.busyId === document.id
+                        ? action.loadingLabel
+                        : action.label}
                     </button>
-                  )}
+                  ))}
                 </td>
               </tr>
             )
@@ -136,12 +190,18 @@ const DocumentList = ({
 function App() {
   const [language, setLanguage] = useState('es')
   const [defaultCurrency, setDefaultCurrency] = useState('USD')
+  const [theme, setTheme] = useState(getInitialTheme)
   const translate = useMemo(() => createTranslator(language), [language])
   const locale = useMemo(
     () => LANGUAGES.find((entry) => entry.value === language)?.locale ?? 'en-US',
     [language],
   )
   const sectionConfig = useMemo(() => createSectionConfig(translate), [translate])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    window.localStorage.setItem('ior-theme', theme)
+  }, [theme])
 
   const [activeSection, setActiveSection] = useState('quotes')
   const [documents, setDocuments] = useState({
@@ -155,6 +215,8 @@ function App() {
   const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '' })
   const [downloadingId, setDownloadingId] = useState(null)
   const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
+  const [invoiceWordGeneratingId, setInvoiceWordGeneratingId] = useState(null)
+  const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -383,7 +445,45 @@ function App() {
     })
   }, [documents, activeSection, filters])
 
-  const currentDocuments = filteredDocuments
+  const sortedDocuments = useMemo(() => {
+    const docs = [...filteredDocuments]
+    const { key, direction } = sortConfig
+    const multiplier = direction === 'asc' ? 1 : -1
+
+    const getComparableValue = (document) => {
+      const partyName =
+        document.partyName || document.customerName || document.supplierName || ''
+      switch (key) {
+        case 'number':
+          return (document.number || '').toLowerCase()
+        case 'date': {
+          const timestamp = new Date(document.date).getTime()
+          return Number.isNaN(timestamp) ? 0 : timestamp
+        }
+        case 'party':
+          return partyName.toLowerCase()
+        case 'total':
+          return Number(document.totalAmount ?? 0)
+        case 'currency':
+          return (document.currencyCode || '').toLowerCase()
+        default:
+          return 0
+      }
+    }
+
+    docs.sort((a, b) => {
+      const valueA = getComparableValue(a)
+      const valueB = getComparableValue(b)
+      if (valueA === valueB) {
+        return 0
+      }
+      return valueA > valueB ? multiplier : -multiplier
+    })
+
+    return docs
+  }, [filteredDocuments, sortConfig])
+
+  const currentDocuments = sortedDocuments
   const config = sectionConfig[activeSection]
   const brandNote =
     BRAND_NOTES[activeSection] ??
@@ -472,10 +572,58 @@ function App() {
     [sectionConfig, translate],
   )
 
+  const handleGenerateInvoiceWord = useCallback(
+    async (doc) => {
+      const quotesConfig = sectionConfig.quotes
+      if (!quotesConfig) {
+        return
+      }
+
+      try {
+        setInvoiceWordGeneratingId(doc.id)
+        const response = await fetch(
+          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-word`,
+        )
+
+        if (!response.ok) {
+          throw new Error(translate('pdf.invoiceWordDownloadError'))
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = window.document.createElement('a')
+        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
+        link.href = downloadUrl
+        link.download = `Invoice-${safeNumber}.docx`
+        window.document.body.appendChild(link)
+        link.click()
+        window.document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+        setStatus({ type: 'success', message: translate('pdf.invoiceWordGenerated') })
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('pdf.invoiceWordDownloadError'),
+        })
+      } finally {
+        setInvoiceWordGeneratingId(null)
+      }
+    },
+    [sectionConfig, translate],
+  )
+
   const FormComponent = useMemo(
     () => (activeSection === 'receipts' ? ReceiptForm : InvoiceForm),
     [activeSection],
   )
+
+  const handleSort = useCallback((columnKey) => {
+    setSortConfig((previous) => {
+      const nextDirection =
+        previous.key === columnKey && previous.direction === 'asc' ? 'desc' : 'asc'
+      return { key: columnKey, direction: nextDirection }
+    })
+  }, [])
 
   return (
     <div className="layout">
@@ -511,6 +659,13 @@ function App() {
                 {translate(`currencies.${code}`)}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="toolbar__control">
+          {translate('controls.theme')}
+          <select value={theme} onChange={(event) => setTheme(event.target.value)}>
+            <option value="light">{translate('controls.themeLight')}</option>
+            <option value="dark">{translate('controls.themeDark')}</option>
           </select>
         </label>
       </div>
@@ -614,15 +769,26 @@ function App() {
             formatDate={formatDate}
             onDownloadPdf={handleDownloadFromList}
             downloadingId={downloadingId}
-            secondaryAction={
+            sortConfig={sortConfig}
+            onSort={handleSort}
+            extraActions={
               activeSection === 'quotes'
-                ? {
-                    label: translate('documentList.generateInvoice'),
-                    loadingLabel: translate('documentList.generatingInvoice'),
-                    busyId: invoiceGeneratingId,
-                    onClick: handleGenerateInvoice,
-                  }
-                : null
+                ? [
+                    {
+                      label: translate('documentList.generateInvoice'),
+                      loadingLabel: translate('documentList.generatingInvoice'),
+                      busyId: invoiceGeneratingId,
+                      onClick: handleGenerateInvoice,
+                    },
+                    {
+                      label: translate('documentList.generateInvoiceWord'),
+                      loadingLabel: translate('documentList.generatingInvoiceWord'),
+                      busyId: invoiceWordGeneratingId,
+                      onClick: handleGenerateInvoiceWord,
+                      variant: 'button--ghost',
+                    },
+                  ]
+                : []
             }
           />
         )}

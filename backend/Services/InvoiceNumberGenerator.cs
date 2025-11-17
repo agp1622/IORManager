@@ -37,5 +37,5 @@ public class InvoiceNumberGenerator : IInvoiceNumberGenerator
     }
 
     private static string FormatInvoiceNumber(int sequenceNumber)
-        => $"INV-{sequenceNumber:000000}";
+        => $"QUO-{sequenceNumber:000000}";
 }

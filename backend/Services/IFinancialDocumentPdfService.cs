@@ -8,6 +8,8 @@ public interface IFinancialDocumentPdfService
 
     byte[] GenerateInvoicePdf(Invoice invoice);
 
+    byte[] GenerateInvoiceWord(Invoice invoice);
+
     byte[] GenerateReceiptPdf(Receipt receipt);
 
     byte[] GeneratePurchaseOrderPdf(PurchaseOrder purchaseOrder);

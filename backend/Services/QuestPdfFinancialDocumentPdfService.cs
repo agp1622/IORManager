@@ -3,11 +3,17 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
+using WordDoc = DocumentFormat.OpenXml.Wordprocessing.Document;
 using IORManager.Models;
 using QuestPDF.Drawing;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using QuestPdfDocument = QuestPDF.Fluent.Document;
+using WordprocessingDocument = DocumentFormat.OpenXml.Packaging.WordprocessingDocument;
 
 namespace IORManager.Services;
 
@@ -49,22 +55,66 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     public byte[] GenerateInvoicePdf(Invoice invoice) =>
         GenerateInvoiceDocument(invoice, isQuote: false);
 
+    public byte[] GenerateInvoiceWord(Invoice invoice)
+    {
+        var resources = GetInvoiceResources(invoice.CultureName, asQuote: false);
+        var culture = resources.Culture;
+        var currencyFormat = CreateCurrencyFormat(culture, invoice.CurrencyCode);
+        var documentNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+
+        using var ms = new MemoryStream();
+        using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document, true))
+        {
+            var mainPart = wordDoc.AddMainDocumentPart();
+            mainPart.Document = new WordDoc(new Body());
+            var body = mainPart.Document.Body!;
+
+            body.Append(CreateHeadingParagraph($"{resources.TitleLabel} {documentNumber}"));
+            body.Append(CreateLabelValueParagraph(resources.NumberLabel, documentNumber));
+            body.Append(CreateLabelValueParagraph(resources.DateLabel, invoice.Date.ToString("D", culture)));
+            body.Append(CreateLabelValueParagraph(resources.ExpirationLabel, invoice.ExpirationDate.ToString("D", culture)));
+            body.Append(CreateLabelValueParagraph(resources.CustomerLabel, invoice.CustomerName));
+            body.Append(CreateLabelValueParagraph(Localize(culture, "Currency", "Moneda"), invoice.CurrencyCode));
+            body.Append(new Paragraph(new Run(new Text(string.Empty))));
+            body.Append(CreateHeadingParagraph(Localize(culture, "Line Items", "Conceptos")));
+
+            body.Append(CreateLinesWordTable(
+                invoice.Lines,
+                culture,
+                currencyFormat,
+                Localize(culture, "Item #", "Ítem #"),
+                resources.DescriptionLabel,
+                resources.QuantityLabel,
+                resources.UnitPriceLabel,
+                Localize(culture, "Price", "Precio")));
+
+            body.Append(new Paragraph(new Run(new Text(string.Empty))));
+            body.Append(CreateLabelValueParagraph(Localize(culture, "Invoice Subtotal", "Subtotal"), FormatCurrency(invoice.TotalAmount, currencyFormat)));
+            body.Append(CreateLabelValueParagraph(Localize(culture, "Tax Rate", "Tasa de impuesto"), "0.00%"));
+            body.Append(CreateLabelValueParagraph(Localize(culture, "Total", "Total"), FormatCurrency(invoice.TotalAmount, currencyFormat)));
+
+            mainPart.Document.Save();
+        }
+
+        return ms.ToArray();
+    }
+
     private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote)
     {
         var resources = GetInvoiceResources(invoice.CultureName, isQuote);
         var culture = resources.Culture;
         var currencyFormat = CreateCurrencyFormat(culture, invoice.CurrencyCode);
+        var documentNumber = isQuote
+            ? invoice.Number
+            : DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+
         var metadata = new List<(string Label, string Value)>
         {
-            (resources.NumberLabel, invoice.Number),
-            (resources.DateLabel, invoice.Date.ToString("d", culture))
+            (resources.NumberLabel, documentNumber),
+            (resources.DateLabel, invoice.Date.ToString("d", culture)),
+            (resources.ExpirationLabel, invoice.ExpirationDate.ToString("d", culture))
         };
-
-        var partyDetails = new List<(string Label, string Value)>
-        {
-            (Localize(culture, "Address", "Dirección"), GetPlaceholderValue(culture)),
-            (Localize(culture, "Phone", "Teléfono"), GetPlaceholderValue(culture))
-        };
+        metadata.Add((resources.CustomerLabel, invoice.CustomerName));
 
         var subtotalLabel = isQuote
             ? Localize(culture, "Quote Subtotal", "Subtotal de cotización")
@@ -82,9 +132,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         return CreateDocument(
             documentTypeLabel: resources.TitleLabel.ToUpperInvariant(),
             metadata: metadata,
-            partyHeading: Localize(culture, "Bill to", "Facturar a"),
-            partyPrimaryValue: invoice.CustomerName,
-            partyDetails: partyDetails,
             content: container => ComposeDocumentLines(
                 container,
                 invoice.Lines,
@@ -94,7 +141,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 resources.DescriptionLabel,
                 resources.QuantityLabel,
                 resources.UnitPriceLabel,
-                Localize(culture, "Discount", "Descuento"),
                 Localize(culture, "Price", "Precio")),
             totals: totals,
             footerNotes: GetFooterNotes(culture),
@@ -112,11 +158,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             (Localize(culture, "Reference", "Referencia"), receipt.ReferenceNumber ?? GetPlaceholderValue(culture))
         };
 
-        var partyDetails = new List<(string Label, string Value)>
-        {
-            (Localize(culture, "Currency", "Moneda"), receipt.CurrencyCode),
-            (Localize(culture, "Customer Email", "Correo del cliente"), GetPlaceholderValue(culture))
-        };
+        metadata.Add((Localize(culture, "Customer", "Cliente"), receipt.CustomerName));
+        metadata.Add((Localize(culture, "Currency", "Moneda"), receipt.CurrencyCode));
 
         var totals = new List<(string Label, string Value)>
         {
@@ -126,9 +169,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         return CreateDocument(
             documentTypeLabel: Localize(culture, "Receipt", "Recibo").ToUpperInvariant(),
             metadata: metadata,
-            partyHeading: Localize(culture, "Customer", "Cliente"),
-            partyPrimaryValue: receipt.CustomerName,
-            partyDetails: partyDetails,
             content: container => ComposeReceiptPayments(
                 container,
                 receipt.Payments,
@@ -150,11 +190,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             (Localize(culture, "Date", "Fecha"), purchaseOrder.Date.ToString("d", culture))
         };
 
-        var partyDetails = new List<(string Label, string Value)>
-        {
-            (Localize(culture, "Address", "Dirección"), GetPlaceholderValue(culture)),
-            (Localize(culture, "Phone", "Teléfono"), GetPlaceholderValue(culture))
-        };
+        metadata.Add((Localize(culture, "Supplier", "Proveedor"), purchaseOrder.SupplierName));
 
         var totals = new List<(string Label, string Value)>
         {
@@ -165,9 +201,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         return CreateDocument(
             documentTypeLabel: Localize(culture, "Purchase Order", "Orden de compra").ToUpperInvariant(),
             metadata: metadata,
-            partyHeading: Localize(culture, "Supplier", "Proveedor"),
-            partyPrimaryValue: purchaseOrder.SupplierName,
-            partyDetails: partyDetails,
             content: container => ComposeDocumentLines(
                 container,
                 purchaseOrder.Lines,
@@ -175,9 +208,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 culture,
                 Localize(culture, "Item #", "Ítem #"),
                 Localize(culture, "Description", "Descripción"),
-                Localize(culture, "Quantity", "Cantidad"),
+                Localize(culture, "Qty", "Cant."),
                 Localize(culture, "Unit Price", "Precio unitario"),
-                Localize(culture, "Discount", "Descuento"),
                 Localize(culture, "Price", "Precio")),
             totals: totals,
             footerNotes: GetFooterNotes(culture),
@@ -187,21 +219,16 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private static byte[] CreateDocument(
         string documentTypeLabel,
         IReadOnlyCollection<(string Label, string Value)> metadata,
-        string partyHeading,
-        string partyPrimaryValue,
-        IReadOnlyCollection<(string Label, string Value)> partyDetails,
         Action<IContainer> content,
         IReadOnlyCollection<(string Label, string Value)> totals,
         IReadOnlyCollection<string> footerNotes,
         CultureInfo culture)
     {
         metadata ??= Array.Empty<(string, string)>();
-        partyDetails ??= Array.Empty<(string, string)>();
         totals ??= Array.Empty<(string, string)>();
         footerNotes ??= Array.Empty<string>();
-        partyPrimaryValue ??= GetPlaceholderValue(culture);
 
-        var doc = Document.Create(document =>
+        var doc = QuestPdfDocument.Create(document =>
         {
             document.Page(page =>
             {
@@ -219,8 +246,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                     column.Spacing(18);
                     column.Item().Element(header =>
                         ComposeHeader(header, documentTypeLabel, metadata));
-                    column.Item().Element(info =>
-                        ComposeDetailsRow(info, partyHeading, partyPrimaryValue, partyDetails));
                     column.Item().Element(body =>
                         ComposeContentCard(body, content));
                     if (totals.Count > 0)
@@ -258,122 +283,69 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             .Border(1)
             .BorderColor(HeaderBorderColor)
             .Padding(20)
-            .Row(row =>
+            .Column(column =>
             {
-                row.RelativeItem().Row(brandRow =>
+                column.Spacing(10);
+                column.Item().Row(row =>
                 {
-                    brandRow.ConstantItem(130).Height(130).Element(logoContainer =>
+                    row.RelativeItem(0.55f).Row(brandRow =>
                     {
-                        if (rasterLogo is not null)
+                        brandRow.ConstantItem(120).Height(120).Element(logoContainer =>
                         {
-                            logoContainer.Image(rasterLogo).FitHeight();
-                        }
-                        else if (vectorLogo is not null)
-                        {
-                            logoContainer.Svg(vectorLogo);
-                        }
-                        else
-                        {
-                            logoContainer
-                                .Background("#ff7b2b")
-                                .AlignCenter()
-                                .AlignMiddle()
-                                .Text("PV")
-                                .FontSize(28)
-                                .SemiBold()
-                                .FontColor("#ffffff");
-                        }
-                    });
-
-                    brandRow.RelativeItem().Column(col =>
-                    {
-                        col.Item().Text(CompanyLegalName).FontSize(16).SemiBold();
-                        col.Item().Text(CompanySecondaryName).FontColor(SecondaryTextColor);
-                    });
-                });
-
-                row.RelativeItem().AlignRight().Column(col =>
-                {
-                    col.Spacing(4);
-                    col.Item()
-                        .AlignRight()
-                        .Text(documentTypeLabel)
-                        .FontSize(24)
-                        .SemiBold();
-
-                    foreach (var entry in metadata.Where(item => !string.IsNullOrWhiteSpace(item.Value)))
-                    {
-                        col.Item().AlignRight().Text(text =>
-                        {
-                            text.Span($"{entry.Label}: ").SemiBold();
-                            text.Span(entry.Value);
+                            if (rasterLogo is not null)
+                            {
+                                logoContainer.Image(rasterLogo).FitHeight();
+                            }
+                            else if (vectorLogo is not null)
+                            {
+                                logoContainer.Svg(vectorLogo);
+                            }
+                            else
+                            {
+                                logoContainer
+                                    .Background("#ff7b2b")
+                                    .AlignCenter()
+                                    .AlignMiddle()
+                                    .Text("PV")
+                                    .FontSize(28)
+                                    .SemiBold()
+                                    .FontColor("#ffffff");
+                            }
                         });
-                    }
+
+                        brandRow.RelativeItem().Column(col =>
+                        {
+                            col.Item().Text(CompanyLegalName).FontSize(18).SemiBold();
+                            col.Item().Text(CompanySecondaryName).FontColor(SecondaryTextColor);
+                        });
+                    });
+
+                    row.RelativeItem(0.45f).AlignRight().Column(col =>
+                    {
+                        col.Spacing(4);
+                        col.Item()
+                            .AlignRight()
+                            .Text(documentTypeLabel)
+                            .FontSize(26)
+                            .SemiBold();
+
+                        foreach (var entry in metadata.Where(item => !string.IsNullOrWhiteSpace(item.Value)))
+                        {
+                            col.Item().AlignRight().Text(text =>
+                            {
+                                text.Span($"{entry.Label}: ").SemiBold();
+                                text.Span(entry.Value);
+                            });
+                        }
+                    });
                 });
-            });
-    }
 
-    private static void ComposeDetailsRow(
-        IContainer container,
-        string partyHeading,
-        string partyPrimaryValue,
-        IReadOnlyCollection<(string Label, string Value)> partyDetails)
-    {
-        container.Row(row =>
-        {
-            row.RelativeItem(0.55f).Element(company =>
-                ComposeCompanyDetails(company));
-            row.RelativeItem(0.45f).Element(party =>
-                ComposePartyDetails(party, partyHeading, partyPrimaryValue, partyDetails));
-        });
-    }
-
-    private static void ComposeCompanyDetails(IContainer container)
-    {
-        container
-            .Background(CardBackgroundColor)
-            .Border(1)
-            .BorderColor(CardBorderColor)
-            .Padding(18)
-            .Column(column =>
-            {
-                column.Spacing(6);
-                column.Item().Text(CompanyLegalName).SemiBold();
-                foreach (var line in CompanyInformationLines)
-                {
-                    column.Item().Text(line).FontColor(SecondaryTextColor);
-                }
-            });
-    }
-
-    private static void ComposePartyDetails(
-        IContainer container,
-        string partyHeading,
-        string partyPrimaryValue,
-        IReadOnlyCollection<(string Label, string Value)> partyDetails)
-    {
-        container
-            .Background(CardBackgroundColor)
-            .Border(1)
-            .BorderColor(CardBorderColor)
-            .Padding(18)
-            .Column(column =>
-            {
-                column.Spacing(6);
                 column.Item().Text(text =>
                 {
-                    text.Span($"{partyHeading}: ").SemiBold();
-                    text.Span(partyPrimaryValue);
+                    text.DefaultTextStyle(TextStyle.Default.FontSize(9).FontColor(SecondaryTextColor));
+                    text.Span(CompanyLegalName + " • ");
+                    text.Span(string.Join(" • ", CompanyInformationLines));
                 });
-
-                foreach (var entry in partyDetails.Where(item => !string.IsNullOrWhiteSpace(item.Label)))
-                {
-                    column.Item().Row(row =>
-                    {
-                        row.ConstantItem(110).Text($"{entry.Label}:").SemiBold().FontColor(SecondaryTextColor);
-                        row.RelativeItem().Text(string.IsNullOrWhiteSpace(entry.Value) ? "-" : entry.Value);
-                    });
-                }
             });
     }
 
@@ -437,19 +409,17 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         string descriptionLabel,
         string quantityLabel,
         string unitPriceLabel,
-        string discountLabel,
         string priceLabel)
     {
         container.Table(table =>
         {
             table.ColumnsDefinition(columns =>
             {
-                columns.RelativeColumn(1.1f);
-                columns.RelativeColumn(5.8f);
-                columns.RelativeColumn(1.3f);
-                columns.RelativeColumn(1.6f);
-                columns.RelativeColumn(1.6f);
-                columns.RelativeColumn(1.8f);
+                columns.ConstantColumn(40);
+                columns.RelativeColumn(6);
+                columns.ConstantColumn(55);
+                columns.ConstantColumn(100);
+                columns.ConstantColumn(100);
             });
 
             table.Header(header =>
@@ -458,7 +428,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 header.Cell().Element(TableHeaderCellStyle).Text(descriptionLabel);
                 header.Cell().Element(TableHeaderCellStyle).AlignCenter().Text(quantityLabel);
                 header.Cell().Element(TableHeaderCellStyle).AlignRight().Text(unitPriceLabel);
-                header.Cell().Element(TableHeaderCellStyle).AlignRight().Text(discountLabel);
                 header.Cell().Element(TableHeaderCellStyle).AlignRight().Text(priceLabel);
             });
 
@@ -475,7 +444,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 });
                 table.Cell().Element(TableBodyCellStyle).AlignCenter().Text(line.Quantity.ToString("N0", culture));
                 table.Cell().Element(TableBodyCellStyle).AlignRight().Text(FormatCurrency(line.UnitPrice, currencyFormat));
-                table.Cell().Element(TableBodyCellStyle).AlignRight().Text(FormatCurrency(0, currencyFormat));
                 table.Cell().Element(TableBodyCellStyle).AlignRight().Text(FormatCurrency(line.LineTotal, currencyFormat));
                 lineIndex++;
             }
@@ -483,12 +451,57 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             for (var row = lines.Count + 1; row <= MinimumLineRows; row++)
             {
                 table.Cell().Element(TableBodyCellStyle).AlignCenter().Text(row.ToString(culture));
-                for (var col = 0; col < 5; col++)
+                for (var col = 0; col < 4; col++)
                 {
                     table.Cell().Element(TableBodyCellStyle).Text(string.Empty);
                 }
             }
         });
+    }
+
+    private static Table CreateLinesWordTable(
+        IReadOnlyCollection<DocumentLine> lines,
+        CultureInfo culture,
+        NumberFormatInfo currencyFormat,
+        string itemLabel,
+        string descriptionLabel,
+        string quantityLabel,
+        string unitPriceLabel,
+        string priceLabel)
+    {
+        var table = new Table();
+        var borders = new TableBorders(
+            new TopBorder { Val = BorderValues.Single, Size = 6 },
+            new BottomBorder { Val = BorderValues.Single, Size = 6 },
+            new LeftBorder { Val = BorderValues.Single, Size = 6 },
+            new RightBorder { Val = BorderValues.Single, Size = 6 },
+            new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
+            new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 });
+
+        table.AppendChild(new TableProperties(new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct }, borders));
+
+        var headerRow = new TableRow();
+        headerRow.Append(CreateHeaderCell(itemLabel));
+        headerRow.Append(CreateHeaderCell(descriptionLabel));
+        headerRow.Append(CreateHeaderCell(quantityLabel));
+        headerRow.Append(CreateHeaderCell(unitPriceLabel));
+        headerRow.Append(CreateHeaderCell(priceLabel));
+        table.Append(headerRow);
+
+        var lineIndex = 1;
+        foreach (var line in lines)
+        {
+            var row = new TableRow();
+            row.Append(CreateCell(lineIndex.ToString(culture)));
+            row.Append(CreateCell(line.Description));
+            row.Append(CreateCell(line.Quantity.ToString("N0", culture)));
+            row.Append(CreateCell(FormatCurrency(line.UnitPrice, currencyFormat)));
+            row.Append(CreateCell(FormatCurrency(line.LineTotal, currencyFormat)));
+            table.Append(row);
+            lineIndex++;
+        }
+
+        return table;
     }
 
     private static void ComposeReceiptPayments(
@@ -609,13 +622,11 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             ? new[]
             {
                 CompanyLegalName,
-                "40% de anticipo y 60 a plazo acordado. Cotización válida por 30 días continuos.",
                 "ariaspavel2@gmail.com"
             }
             : new[]
             {
                 CompanySecondaryName,
-                "40% upfront and 60 on the agreed term. Quote valid for 30 continuous days.",
                 "ariaspavel2@gmail.com"
             };
 
@@ -683,19 +694,48 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             culture,
             title,
             isSpanish ? "Fecha" : "Date",
+            isSpanish ? "Vence" : "Expires",
             isSpanish ? "Cliente" : "Customer",
             numberLabel,
             isSpanish ? "Descripción" : "Description",
-            isSpanish ? "Cantidad" : "Quantity",
+            isSpanish ? "Cant." : "Qty.",
             isSpanish ? "Precio unitario" : "Unit Price",
             isSpanish ? "Subtotal" : "Line Total",
             isSpanish ? "Total" : "Total");
     }
 
+    private static Paragraph CreateHeadingParagraph(string text)
+    {
+        var run = new Run(new RunProperties(new Bold(), new FontSize { Val = "30" }), new Text(text ?? string.Empty));
+        return new Paragraph(run)
+        {
+            ParagraphProperties = new ParagraphProperties(new SpacingBetweenLines { After = "160" })
+        };
+    }
+
+    private static Paragraph CreateLabelValueParagraph(string label, string value)
+    {
+        var paragraph = new Paragraph();
+        paragraph.Append(new Run(new RunProperties(new Bold()), new Text((label ?? string.Empty) + ": ")));
+        paragraph.Append(new Run(new Text(value ?? string.Empty)));
+        return paragraph;
+    }
+
+    private static TableCell CreateHeaderCell(string text)
+    {
+        var cell = new TableCell(new Paragraph(new Run(new RunProperties(new Bold()), new Text(text ?? string.Empty))));
+        cell.Append(new TableCellProperties(new Shading { Fill = "e1e4ec", Val = ShadingPatternValues.Clear }));
+        return cell;
+    }
+
+    private static TableCell CreateCell(string text) =>
+        new(new Paragraph(new Run(new Text(text ?? string.Empty))));
+
     private sealed record InvoicePdfResources(
         CultureInfo Culture,
         string TitleLabel,
         string DateLabel,
+        string ExpirationLabel,
         string CustomerLabel,
         string NumberLabel,
         string DescriptionLabel,

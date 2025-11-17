@@ -15,5 +15,7 @@ public class Invoice : FinancialDocument
 
     public List<DocumentLine> Lines { get; set; }
 
+    public DateOnly ExpirationDate => Date.AddDays(30);
+
     public void RecalculateTotal() => TotalAmount = Lines.Sum(line => line.LineTotal);
 }

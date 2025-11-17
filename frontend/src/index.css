@@ -6,22 +6,95 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: #0f172a;
+  background-color: #f4f6fb;
+
+  --text-strong: #0f172a;
+  --text-muted: #52606d;
+  --panel-bg: rgba(255, 255, 255, 0.96);
+  --panel-border: rgba(15, 23, 42, 0.08);
+  --panel-highlight: rgba(15, 23, 42, 0.04);
+  --panel-glow-primary: rgba(100, 149, 237, 0.18);
+  --panel-glow-secondary: rgba(255, 171, 95, 0.15);
+  --page-header-bg: linear-gradient(135deg, #ffffff, #eef3ff);
+  --page-header-overlay: radial-gradient(circle at 20% 20%, rgba(255, 187, 146, 0.35), transparent 55%),
+    radial-gradient(circle at 80% 30%, rgba(129, 186, 255, 0.35), transparent 60%);
+  --toolbar-bg: rgba(255, 255, 255, 0.95);
+  --toolbar-border: rgba(15, 23, 42, 0.08);
+  --filter-bg: rgba(255, 255, 255, 0.92);
+  --filter-border: rgba(15, 23, 42, 0.1);
+  --section-tab-bg: rgba(255, 255, 255, 0.92);
+  --section-tab-border: rgba(15, 23, 42, 0.12);
+  --section-tab-text: #55627a;
+  --section-tab-active-bg: linear-gradient(135deg, #ffd9b5, #cfe5ff);
+  --section-tab-active-text: #03122c;
+  --section-tab-active-shadow: 0 15px 25px rgba(165, 182, 210, 0.35);
+  --brand-panel-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(234, 241, 255, 0.96));
+  --brand-panel-border: rgba(15, 23, 42, 0.08);
+  --brand-shadow: 0 25px 60px rgba(15, 23, 42, 0.12);
+  --document-table-border: rgba(15, 23, 42, 0.08);
+  --document-table-header-bg: rgba(230, 240, 255, 0.95);
+  --document-table-header-text: #0f172a;
+  --document-table-row-hover: rgba(9, 105, 218, 0.08);
+  --document-card-bg: rgba(255, 255, 255, 0.94);
+  --document-card-border: rgba(15, 23, 42, 0.08);
+  --button-gradient: linear-gradient(135deg, #ffb347, #7dc8ff);
+  --button-primary-text: #03122c;
+  --button-secondary-bg: rgba(15, 23, 42, 0.05);
+  --button-secondary-border: rgba(15, 23, 42, 0.15);
+  --button-ghost-border: rgba(15, 23, 42, 0.25);
+  --button-ghost-color: #0f172a;
+  --button-icon-bg: rgba(255, 123, 43, 0.15);
+  --button-icon-border: rgba(255, 123, 43, 0.35);
+  --button-icon-hover-bg: rgba(255, 123, 43, 0.25);
+  --body-gradient: linear-gradient(160deg, #f5f7ff 0%, #f0f4ff 50%, #e6efff 100%);
+}
+
+:root[data-theme='dark'] {
   color: #f5f7ff;
   background-color: #01050f;
 
-  --brand-navy: #010814;
-  --brand-midnight: #041933;
-  --brand-blue: #0a6dc8;
-  --brand-cyan: #32c3ff;
-  --brand-orange: #ff7b2b;
-  --brand-shadow: 0 35px 80px rgba(1, 8, 20, 0.65);
+  --text-strong: #f7faff;
+  --text-muted: #8fb2d6;
   --panel-bg: rgba(5, 20, 43, 0.92);
   --panel-border: rgba(255, 255, 255, 0.08);
   --panel-highlight: rgba(255, 255, 255, 0.05);
-  --text-strong: #f7faff;
-  --text-muted: #8fb2d6;
-  --glow-blue: rgba(9, 123, 210, 0.48);
-  --glow-orange: rgba(255, 123, 43, 0.45);
+  --panel-glow-primary: rgba(50, 195, 255, 0.15);
+  --panel-glow-secondary: rgba(255, 123, 43, 0.12);
+  --page-header-bg: linear-gradient(135deg, rgba(3, 12, 26, 0.92), rgba(7, 37, 78, 0.92));
+  --page-header-overlay: radial-gradient(circle at 20% 20%, rgba(255, 123, 43, 0.35), transparent 55%),
+    radial-gradient(circle at 80% 30%, rgba(11, 109, 200, 0.35), transparent 60%);
+  --toolbar-bg: rgba(5, 16, 35, 0.85);
+  --toolbar-border: rgba(255, 255, 255, 0.08);
+  --filter-bg: rgba(4, 18, 41, 0.9);
+  --filter-border: rgba(255, 255, 255, 0.08);
+  --section-tab-bg: rgba(1, 8, 24, 0.65);
+  --section-tab-border: rgba(255, 255, 255, 0.08);
+  --section-tab-text: #94a3b8;
+  --section-tab-active-bg: linear-gradient(135deg, #ffb374, #41b1ff);
+  --section-tab-active-text: #010814;
+  --section-tab-active-shadow: 0 15px 35px rgba(0, 0, 0, 0.45);
+  --brand-panel-bg: linear-gradient(135deg, rgba(3, 14, 34, 0.9), rgba(4, 32, 74, 0.95));
+  --brand-panel-border: rgba(255, 255, 255, 0.08);
+  --brand-shadow: 0 35px 80px rgba(1, 8, 20, 0.65);
+  --document-table-border: rgba(255, 255, 255, 0.05);
+  --document-table-header-bg: rgba(11, 109, 200, 0.35);
+  --document-table-header-text: #cbe9ff;
+  --document-table-row-hover: rgba(3, 78, 141, 0.15);
+  --document-card-bg: rgba(0, 0, 0, 0.18);
+  --document-card-border: rgba(255, 255, 255, 0.08);
+  --button-gradient: linear-gradient(135deg, #ff7b2b, #32c3ff);
+  --button-primary-text: #03122c;
+  --button-secondary-bg: rgba(255, 255, 255, 0.06);
+  --button-secondary-border: rgba(255, 255, 255, 0.18);
+  --button-ghost-border: rgba(255, 255, 255, 0.3);
+  --button-ghost-color: #f7faff;
+  --button-icon-bg: rgba(255, 123, 43, 0.15);
+  --button-icon-border: rgba(255, 123, 43, 0.35);
+  --button-icon-hover-bg: rgba(255, 123, 43, 0.28);
+  --body-gradient: radial-gradient(circle at 20% 20%, rgba(6, 86, 179, 0.35), transparent 45%),
+    radial-gradient(circle at 80% 0%, rgba(255, 123, 43, 0.2), transparent 40%),
+    linear-gradient(160deg, #01050f 0%, #031129 50%, #050d1f 100%);
 }
 
 *,
@@ -33,10 +106,9 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at 20% 20%, rgba(6, 86, 179, 0.35), transparent 45%),
-    radial-gradient(circle at 80% 0%, rgba(255, 123, 43, 0.2), transparent 40%),
-    linear-gradient(160deg, #01050f 0%, #031129 50%, #050d1f 100%);
+  background: var(--body-gradient);
   color: var(--text-strong);
+  transition: background 0.35s ease, color 0.2s ease;
 }
 
 #root {

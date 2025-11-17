@@ -79,6 +79,21 @@ public class InvoicesController : ControllerBase
         }
 
         var pdfBytes = _pdfService.GenerateInvoicePdf(invoice);
-        return File(pdfBytes, "application/pdf", $"Invoice-{invoice.Number}.pdf");
+        var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+        return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
+    }
+
+    [HttpGet("{id:guid}/invoice-word")]
+    public ActionResult GetInvoiceDocumentWord(Guid id)
+    {
+        var invoice = _repository.GetById(id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        var docBytes = _pdfService.GenerateInvoiceWord(invoice);
+        var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+        return File(docBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"Invoice-{invoiceNumber}.docx");
     }
 }
