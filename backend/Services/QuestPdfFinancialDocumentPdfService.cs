@@ -28,7 +28,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private const string TableBorderColor = "#e1e4ec";
     private const string PrimaryTextColor = "#101828";
     private const string SecondaryTextColor = "#4b5565";
-    private const int MinimumLineRows = 6;
 
     private const string CompanyLegalName = "Papavelag Technologies & Soluciones S.R.L.";
     private const string CompanySecondaryName = "Papavelag Technologies & Solutions S.R.L.";
@@ -448,14 +447,6 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 lineIndex++;
             }
 
-            for (var row = lines.Count + 1; row <= MinimumLineRows; row++)
-            {
-                table.Cell().Element(TableBodyCellStyle).AlignCenter().Text(row.ToString(culture));
-                for (var col = 0; col < 4; col++)
-                {
-                    table.Cell().Element(TableBodyCellStyle).Text(string.Empty);
-                }
-            }
         });
     }
 
