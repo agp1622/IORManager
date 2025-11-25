@@ -41,6 +41,7 @@ const InvoiceForm = ({
   const [invoiceDate, setInvoiceDate] = useState(today)
   const [customerName, setCustomerName] = useState('')
   const [currencyCode, setCurrencyCode] = useState(defaultCurrency)
+  const [itbisRate, setItbisRate] = useState('')
   const [lines, setLines] = useState([createEmptyLine()])
 
   useEffect(() => {
@@ -73,11 +74,21 @@ const InvoiceForm = ({
   const handleSubmit = async (event) => {
     event.preventDefault()
 
+    const normalizedItbisRate = (() => {
+      const parsed = Number(itbisRate)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return null
+      }
+      const capped = Math.min(parsed, 100)
+      return capped / 100
+    })()
+
     const payload = {
       invoiceDate,
       customerName,
       currencyCode,
       locale,
+      itbisRate: normalizedItbisRate,
       lines: lines.map((line) => ({
         description: line.description,
         quantity: Number(line.quantity) || 0,
@@ -92,6 +103,7 @@ const InvoiceForm = ({
       setInvoiceDate(today)
       setCustomerName('')
       setCurrencyCode(defaultCurrency)
+      setItbisRate('')
       setLines([createEmptyLine()])
     }
   }
@@ -131,6 +143,19 @@ const InvoiceForm = ({
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          {t('invoiceForm.itbisLabel')}
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={itbisRate}
+            onChange={(event) => setItbisRate(event.target.value)}
+            placeholder={t('invoiceForm.itbisPlaceholder')}
+          />
+          <p className="input-hint">{t('invoiceForm.itbisHint')}</p>
         </label>
       </div>
 

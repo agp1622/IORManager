@@ -70,7 +70,7 @@ public class InvoicesController : ControllerBase
     }
 
     [HttpGet("{id:guid}/invoice-pdf")]
-    public ActionResult GetInvoiceDocumentPdf(Guid id)
+    public ActionResult GetInvoiceDocumentPdf(Guid id, [FromQuery] string? ncfNumber)
     {
         var invoice = _repository.GetById(id);
         if (invoice is null)
@@ -78,13 +78,14 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice);
+        var normalizedNcf = NormalizeNcfNumber(ncfNumber);
+        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
     }
 
     [HttpGet("{id:guid}/invoice-word")]
-    public ActionResult GetInvoiceDocumentWord(Guid id)
+    public ActionResult GetInvoiceDocumentWord(Guid id, [FromQuery] string? ncfNumber)
     {
         var invoice = _repository.GetById(id);
         if (invoice is null)
@@ -92,8 +93,35 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var docBytes = _pdfService.GenerateInvoiceWord(invoice);
+        var normalizedNcf = NormalizeNcfNumber(ncfNumber);
+        var docBytes = _pdfService.GenerateInvoiceWord(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(docBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"Invoice-{invoiceNumber}.docx");
+    }
+
+    private static string? NormalizeNcfNumber(string? ncfNumber)
+    {
+        if (string.IsNullOrWhiteSpace(ncfNumber))
+        {
+            return null;
+        }
+
+        var trimmed = ncfNumber.Trim();
+        const string prefix = "NCF";
+
+        if (trimmed.Length >= prefix.Length &&
+            trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var suffix = trimmed[prefix.Length..];
+            if (string.IsNullOrWhiteSpace(suffix))
+            {
+                return null;
+            }
+
+            return $"{prefix}{suffix}";
+        }
+
+        var joiner = char.IsLetterOrDigit(trimmed[0]) ? " " : string.Empty;
+        return $"{prefix}{joiner}{trimmed}";
     }
 }

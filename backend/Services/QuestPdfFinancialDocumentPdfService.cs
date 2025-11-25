@@ -7,6 +7,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using WordDoc = DocumentFormat.OpenXml.Wordprocessing.Document;
+using WordColor = DocumentFormat.OpenXml.Wordprocessing.Color;
 using IORManager.Models;
 using QuestPDF.Drawing;
 using QuestPDF.Fluent;
@@ -28,6 +29,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private const string TableBorderColor = "#e1e4ec";
     private const string PrimaryTextColor = "#101828";
     private const string SecondaryTextColor = "#4b5565";
+    private const string NcfFieldColor = "#c53030";
+    private const string NcfWordColor = "C53030";
 
     private const string CompanyLegalName = "Papavelag Technologies & Soluciones S.R.L.";
     private const string CompanySecondaryName = "Papavelag Technologies & Solutions S.R.L.";
@@ -49,17 +52,21 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     }
 
     public byte[] GenerateQuotePdf(Invoice invoice) =>
-        GenerateInvoiceDocument(invoice, isQuote: true);
+        GenerateInvoiceDocument(invoice, isQuote: true, ncfNumber: null);
 
-    public byte[] GenerateInvoicePdf(Invoice invoice) =>
-        GenerateInvoiceDocument(invoice, isQuote: false);
+    public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) =>
+        GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber);
 
-    public byte[] GenerateInvoiceWord(Invoice invoice)
+    public byte[] GenerateInvoiceWord(Invoice invoice, string? ncfNumber = null)
     {
         var resources = GetInvoiceResources(invoice.CultureName, asQuote: false);
         var culture = resources.Culture;
         var currencyFormat = CreateCurrencyFormat(culture, invoice.CurrencyCode);
         var documentNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+        var totals = GetInvoiceTotals(invoice);
+        var subtotalLabel = Localize(culture, "Invoice Subtotal", "Subtotal");
+        var itbisRateLabel = Localize(culture, "ITBIS Rate", "Tasa ITBIS");
+        var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
 
         using var ms = new MemoryStream();
         using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document, true))
@@ -74,6 +81,11 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             body.Append(CreateLabelValueParagraph(resources.ExpirationLabel, invoice.ExpirationDate.ToString("D", culture)));
             body.Append(CreateLabelValueParagraph(resources.CustomerLabel, invoice.CustomerName));
             body.Append(CreateLabelValueParagraph(Localize(culture, "Currency", "Moneda"), invoice.CurrencyCode));
+            var displayNcf = ncfNumber?.Trim();
+            if (!string.IsNullOrWhiteSpace(displayNcf))
+            {
+                body.Append(CreateLabelValueParagraph(Localize(culture, "NCF", "NCF"), displayNcf, NcfWordColor));
+            }
             body.Append(new Paragraph(new Run(new Text(string.Empty))));
             body.Append(CreateHeadingParagraph(Localize(culture, "Line Items", "Conceptos")));
 
@@ -88,9 +100,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 Localize(culture, "Price", "Precio")));
 
             body.Append(new Paragraph(new Run(new Text(string.Empty))));
-            body.Append(CreateLabelValueParagraph(Localize(culture, "Invoice Subtotal", "Subtotal"), FormatCurrency(invoice.TotalAmount, currencyFormat)));
-            body.Append(CreateLabelValueParagraph(Localize(culture, "Tax Rate", "Tasa de impuesto"), "0.00%"));
-            body.Append(CreateLabelValueParagraph(Localize(culture, "Total", "Total"), FormatCurrency(invoice.TotalAmount, currencyFormat)));
+            body.Append(CreateLabelValueParagraph(subtotalLabel, FormatCurrency(totals.Subtotal, currencyFormat)));
+            body.Append(CreateLabelValueParagraph(itbisRateLabel, FormatPercentage(totals.Rate, culture)));
+            body.Append(CreateLabelValueParagraph(itbisAmountLabel, FormatCurrency(totals.ItbisAmount, currencyFormat)));
+            body.Append(CreateLabelValueParagraph(Localize(culture, "Total", "Total"), FormatCurrency(totals.Total, currencyFormat)));
 
             mainPart.Document.Save();
         }
@@ -98,11 +111,12 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         return ms.ToArray();
     }
 
-    private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote)
+    private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote, string? ncfNumber)
     {
         var resources = GetInvoiceResources(invoice.CultureName, isQuote);
         var culture = resources.Culture;
         var currencyFormat = CreateCurrencyFormat(culture, invoice.CurrencyCode);
+        var invoiceNcf = isQuote ? null : (string.IsNullOrWhiteSpace(ncfNumber) ? null : ncfNumber.Trim());
         var documentNumber = isQuote
             ? invoice.Number
             : DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
@@ -115,17 +129,20 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         };
         metadata.Add((resources.CustomerLabel, invoice.CustomerName));
 
+        var invoiceTotals = GetInvoiceTotals(invoice);
         var subtotalLabel = isQuote
             ? Localize(culture, "Quote Subtotal", "Subtotal de cotización")
             : Localize(culture, "Invoice Subtotal", "Subtotal de factura");
+        var itbisRateLabel = Localize(culture, "ITBIS Rate", "Tasa ITBIS");
+        var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
 
         var totals = new List<(string Label, string Value)>
         {
-            (subtotalLabel, FormatCurrency(invoice.TotalAmount, currencyFormat)),
-            (Localize(culture, "Tax Rate", "Tasa de impuesto"), "0.00%"),
-            (Localize(culture, "Sales Tax", "Impuesto"), FormatCurrency(0, currencyFormat)),
+            (subtotalLabel, FormatCurrency(invoiceTotals.Subtotal, currencyFormat)),
+            (itbisRateLabel, FormatPercentage(invoiceTotals.Rate, culture)),
+            (itbisAmountLabel, FormatCurrency(invoiceTotals.ItbisAmount, currencyFormat)),
             (Localize(culture, "Deposit Received", "Depósito recibido"), FormatCurrency(0, currencyFormat)),
-            ($"{resources.TotalLabel.ToUpperInvariant()} ({currencyFormat.CurrencySymbol})", FormatCurrency(invoice.TotalAmount, currencyFormat))
+            ($"{resources.TotalLabel.ToUpperInvariant()} ({currencyFormat.CurrencySymbol})", FormatCurrency(invoiceTotals.Total, currencyFormat))
         };
 
         return CreateDocument(
@@ -143,7 +160,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 Localize(culture, "Price", "Precio")),
             totals: totals,
             footerNotes: GetFooterNotes(culture),
-            culture: culture);
+            culture: culture,
+            ncfNumber: invoiceNcf);
     }
 
     public byte[] GenerateReceiptPdf(Receipt receipt)
@@ -215,13 +233,21 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             culture: culture);
     }
 
+    private static InvoiceTotals GetInvoiceTotals(Invoice invoice)
+    {
+        var (subtotal, normalizedRate, itbisAmount) = invoice.CalculateFinancials();
+        var total = subtotal + itbisAmount;
+        return new InvoiceTotals(subtotal, normalizedRate, itbisAmount, total);
+    }
+
     private static byte[] CreateDocument(
         string documentTypeLabel,
         IReadOnlyCollection<(string Label, string Value)> metadata,
         Action<IContainer> content,
         IReadOnlyCollection<(string Label, string Value)> totals,
         IReadOnlyCollection<string> footerNotes,
-        CultureInfo culture)
+        CultureInfo culture,
+        string? ncfNumber = null)
     {
         metadata ??= Array.Empty<(string, string)>();
         totals ??= Array.Empty<(string, string)>();
@@ -244,7 +270,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 {
                     column.Spacing(18);
                     column.Item().Element(header =>
-                        ComposeHeader(header, documentTypeLabel, metadata));
+                        ComposeHeader(header, documentTypeLabel, metadata, ncfNumber, culture));
                     column.Item().Element(body =>
                         ComposeContentCard(body, content));
                     if (totals.Count > 0)
@@ -272,7 +298,9 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private static void ComposeHeader(
         IContainer container,
         string documentTypeLabel,
-        IReadOnlyCollection<(string Label, string Value)> metadata)
+        IReadOnlyCollection<(string Label, string Value)> metadata,
+        string? ncfNumber,
+        CultureInfo culture)
     {
         var rasterLogo = BrandRasterLogo.Value;
         var vectorLogo = BrandVectorLogo.Value;
@@ -334,6 +362,16 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                             {
                                 text.Span($"{entry.Label}: ").SemiBold();
                                 text.Span(entry.Value);
+                            });
+                        }
+
+                        var displayNcf = ncfNumber?.Trim();
+                        if (!string.IsNullOrWhiteSpace(displayNcf))
+                        {
+                            col.Item().AlignRight().Text(text =>
+                            {
+                                text.Span($"{Localize(culture, "NCF", "NCF")}: ").SemiBold().FontColor(NcfFieldColor);
+                                text.Span(displayNcf).FontColor(NcfFieldColor);
                             });
                         }
                     });
@@ -593,6 +631,9 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private static string FormatCurrency(decimal amount, NumberFormatInfo currencyFormat) =>
         amount.ToString("C", currencyFormat);
 
+    private static string FormatPercentage(decimal rate, CultureInfo culture) =>
+        rate.ToString("P2", culture);
+
     private static string FormatUnitOfMeasure(string? unitCode, CultureInfo culture)
     {
         if (string.IsNullOrWhiteSpace(unitCode))
@@ -704,11 +745,24 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         };
     }
 
-    private static Paragraph CreateLabelValueParagraph(string label, string value)
+    private static Paragraph CreateLabelValueParagraph(string label, string value, string? hexColor = null)
     {
         var paragraph = new Paragraph();
-        paragraph.Append(new Run(new RunProperties(new Bold()), new Text((label ?? string.Empty) + ": ")));
-        paragraph.Append(new Run(new Text(value ?? string.Empty)));
+        var labelRunProps = new RunProperties(new Bold());
+        if (!string.IsNullOrEmpty(hexColor))
+        {
+            labelRunProps.AppendChild(new WordColor { Val = hexColor });
+        }
+
+        paragraph.Append(new Run(labelRunProps, new Text($"{label ?? string.Empty}: ")));
+
+        var valueRunProps = new RunProperties();
+        if (!string.IsNullOrEmpty(hexColor))
+        {
+            valueRunProps.AppendChild(new WordColor { Val = hexColor });
+        }
+
+        paragraph.Append(new Run(valueRunProps, new Text(value ?? string.Empty)));
         return paragraph;
     }
 
@@ -722,16 +776,18 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     private static TableCell CreateCell(string text) =>
         new(new Paragraph(new Run(new Text(text ?? string.Empty))));
 
-    private sealed record InvoicePdfResources(
-        CultureInfo Culture,
-        string TitleLabel,
-        string DateLabel,
-        string ExpirationLabel,
-        string CustomerLabel,
-        string NumberLabel,
-        string DescriptionLabel,
-        string QuantityLabel,
-        string UnitPriceLabel,
-        string LineTotalLabel,
-        string TotalLabel);
+private sealed record InvoiceTotals(decimal Subtotal, decimal Rate, decimal ItbisAmount, decimal Total);
+
+private sealed record InvoicePdfResources(
+    CultureInfo Culture,
+    string TitleLabel,
+    string DateLabel,
+    string ExpirationLabel,
+    string CustomerLabel,
+    string NumberLabel,
+    string DescriptionLabel,
+    string QuantityLabel,
+    string UnitPriceLabel,
+    string LineTotalLabel,
+    string TotalLabel);
 }

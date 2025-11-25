@@ -23,6 +23,9 @@ public record InvoiceCreateRequest
     [MinLength(1)]
     public IReadOnlyList<InvoiceLineRequest> Lines { get; init; } = Array.Empty<InvoiceLineRequest>();
 
+    [Range(typeof(decimal), "0.0", "1.0")]
+    public decimal? ItbisRate { get; init; }
+
     public Invoice ToInvoice()
     {
         var invoice = new Invoice
@@ -32,7 +35,8 @@ public record InvoiceCreateRequest
             CustomerName = CustomerName,
             CurrencyCode = CurrencyCode,
             CultureName = Locale,
-            Lines = Lines.Select(line => line.ToDocumentLine()).ToList()
+            Lines = Lines.Select(line => line.ToDocumentLine()).ToList(),
+            ItbisRate = ItbisRate
         };
 
         invoice.RecalculateTotal();

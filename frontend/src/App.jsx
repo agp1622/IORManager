@@ -67,6 +67,33 @@ const createSectionConfig = (t) => ({
   },
 })
 
+const normalizeNcfInput = (value) => {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  const prefix = 'NCF'
+  if (trimmed.length >= prefix.length && trimmed.slice(0, prefix.length).toUpperCase() === prefix) {
+    const suffix = trimmed.slice(prefix.length)
+    if (!/[A-Za-z0-9]/.test(suffix)) {
+      return ''
+    }
+    return `${prefix}${suffix}`
+  }
+
+  if (!/[A-Za-z0-9]/.test(trimmed)) {
+    return ''
+  }
+
+  const joiner = /^[A-Za-z0-9]/.test(trimmed[0]) ? ' ' : ''
+  return `${prefix}${joiner}${trimmed}`
+}
+
 const DocumentList = ({
   documents,
   config,
@@ -529,6 +556,26 @@ function App() {
     [activeSection, sectionConfig, translate],
   )
 
+  const promptForNcfNumber = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return { cancelled: true }
+    }
+
+    const defaultValue = 'NCF '
+    const userInput = window.prompt(translate('pdf.ncfPrompt'), defaultValue)
+
+    if (userInput === null) {
+      return { cancelled: true }
+    }
+
+    const normalized = normalizeNcfInput(userInput)
+    if (!normalized) {
+      return { cancelled: false, value: null }
+    }
+
+    return { cancelled: false, value: normalized }
+  }, [translate])
+
   const handleGenerateInvoice = useCallback(
     async (doc) => {
       const quotesConfig = sectionConfig.quotes
@@ -536,10 +583,25 @@ function App() {
         return
       }
 
+      const { cancelled, value } = promptForNcfNumber()
+      if (cancelled) {
+        return
+      }
+
+      if (!value) {
+        setStatus({
+          type: 'error',
+          message: translate('pdf.ncfRequired'),
+        })
+        return
+      }
+
       try {
         setInvoiceGeneratingId(doc.id)
         const response = await fetch(
-          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-pdf`,
+          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-pdf?ncfNumber=${encodeURIComponent(
+            value,
+          )}`,
         )
 
         if (!response.ok) {
@@ -569,7 +631,7 @@ function App() {
         setInvoiceGeneratingId(null)
       }
     },
-    [sectionConfig, translate],
+    [promptForNcfNumber, sectionConfig, setStatus, translate],
   )
 
   const handleGenerateInvoiceWord = useCallback(
@@ -579,10 +641,25 @@ function App() {
         return
       }
 
+      const { cancelled, value } = promptForNcfNumber()
+      if (cancelled) {
+        return
+      }
+
+      if (!value) {
+        setStatus({
+          type: 'error',
+          message: translate('pdf.ncfRequired'),
+        })
+        return
+      }
+
       try {
         setInvoiceWordGeneratingId(doc.id)
         const response = await fetch(
-          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-word`,
+          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-word?ncfNumber=${encodeURIComponent(
+            value,
+          )}`,
         )
 
         if (!response.ok) {
@@ -609,7 +686,7 @@ function App() {
         setInvoiceWordGeneratingId(null)
       }
     },
-    [sectionConfig, translate],
+    [promptForNcfNumber, sectionConfig, setStatus, translate],
   )
 
   const FormComponent = useMemo(
