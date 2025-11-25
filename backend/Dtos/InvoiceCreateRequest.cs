@@ -69,3 +69,28 @@ public record InvoiceLineRequest
         UnitOfMeasure = UnitOfMeasure
     };
 }
+
+public record InvoiceUpdateRequest
+{
+    [Required]
+    public DateOnly InvoiceDate { get; init; }
+        = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    [Required]
+    public string CustomerName { get; init; } = string.Empty;
+
+    [Required]
+    [RegularExpression("USD|DOP")]
+    public string CurrencyCode { get; init; } = "USD";
+
+    [Required]
+    [RegularExpression("en-US|es-DO")]
+    public string Locale { get; init; } = "es-DO";
+
+    [MinLength(1)]
+    public IReadOnlyList<InvoiceLineRequest> Lines { get; init; } = Array.Empty<InvoiceLineRequest>();
+
+    [Range(typeof(decimal), "0.0", "1.0")]
+    public decimal? ItbisRate { get; init; }
+        = null;
+}

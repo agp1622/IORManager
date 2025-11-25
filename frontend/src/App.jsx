@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import InvoiceForm from './components/InvoiceForm'
 import ReceiptForm from './components/ReceiptForm'
 import './App.css'
@@ -7,6 +7,7 @@ import PapavelagLogo from './assets/papavelag-logo.svg'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5031/api'
 const CURRENCY_CODES = ['USD', 'DOP']
+const ROWS_PER_PAGE = 10
 
 const BRAND_NOTES = {
   quotes: 'Cotizaciones impactantes listas para convertirse en facturas.',
@@ -105,6 +106,7 @@ const DocumentList = ({
   extraActions = [],
   sortConfig,
   onSort,
+  pagination,
 }) => {
   const getAriaSort = (key) => {
     if (!sortConfig || sortConfig.key !== key) {
@@ -210,6 +212,29 @@ const DocumentList = ({
           })}
         </tbody>
       </table>
+      {pagination ? (
+        <div className="table-pagination">
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => pagination.onPageChange(pagination.currentPage - 1)}
+            disabled={pagination.currentPage <= 1}
+          >
+            {t('pagination.previous')}
+          </button>
+          <span className="table-pagination__info">
+            {t('pagination.page')} {pagination.currentPage} {t('pagination.of')} {pagination.totalPages}
+          </span>
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => pagination.onPageChange(pagination.currentPage + 1)}
+            disabled={pagination.currentPage >= pagination.totalPages}
+          >
+            {t('pagination.next')}
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -242,8 +267,11 @@ function App() {
   const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '' })
   const [downloadingId, setDownloadingId] = useState(null)
   const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
-  const [invoiceWordGeneratingId, setInvoiceWordGeneratingId] = useState(null)
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
+  const [editingQuote, setEditingQuote] = useState(null)
+  const [pageBySection, setPageBySection] = useState({ quotes: 1, receipts: 1 })
+  const previewUrlRef = useRef(null)
+  const [previewingId, setPreviewingId] = useState(null)
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -327,6 +355,38 @@ function App() {
   useEffect(() => {
     setFilters({ search: '', client: '', number: '', date: '' })
   }, [activeSection])
+
+  useEffect(() => {
+    if (activeSection !== 'quotes') {
+      setEditingQuote(null)
+    }
+  }, [activeSection])
+
+  useEffect(() => {
+    setPageBySection((previous) => {
+      const currentPage = previous[activeSection] ?? 1
+      if (currentPage === 1) {
+        return previous
+      }
+      return { ...previous, [activeSection]: 1 }
+    })
+  }, [activeSection, filters])
+
+  useEffect(() => {
+    if (previewUrlRef.current) {
+      window.URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = null
+    }
+  }, [activeSection])
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        window.URL.revokeObjectURL(previewUrlRef.current)
+        previewUrlRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!status) {
@@ -510,12 +570,52 @@ function App() {
     return docs
   }, [filteredDocuments, sortConfig])
 
+  const currentPage = pageBySection[activeSection] ?? 1
+  const totalPages = Math.max(1, Math.ceil(sortedDocuments.length / ROWS_PER_PAGE))
+
+  const handlePageChange = useCallback(
+    (nextPage) => {
+      setPageBySection((previous) => ({
+        ...previous,
+        [activeSection]: Math.min(Math.max(1, nextPage), totalPages),
+      }))
+    },
+    [activeSection, totalPages],
+  )
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      handlePageChange(totalPages)
+    }
+  }, [currentPage, totalPages, handlePageChange])
+
+  const pageStart = (currentPage - 1) * ROWS_PER_PAGE
+  const paginatedDocuments = sortedDocuments.slice(pageStart, pageStart + ROWS_PER_PAGE)
+  const paginationConfig =
+    totalPages > 1
+      ? {
+          currentPage,
+          totalPages,
+          onPageChange: handlePageChange,
+        }
+      : null
+
   const currentDocuments = sortedDocuments
   const config = sectionConfig[activeSection]
+  const isQuotesSection = activeSection === 'quotes'
+  const isEditingQuote = isQuotesSection && Boolean(editingQuote)
   const brandNote =
     BRAND_NOTES[activeSection] ??
     BRAND_NOTES.default ??
     `Documentos ${config?.singular?.toLowerCase?.() ?? 'corporativos'} con el sello PAPAVELAG.`
+  const formHeading = isEditingQuote
+    ? `${translate('invoiceForm.editHeading')}${
+        editingQuote?.number ? ` · ${editingQuote.number}` : ''
+      }`
+    : config.createHeading
+  const formDescription = isEditingQuote
+    ? translate('invoiceForm.editDescription')
+    : config.createDescription
 
   const handleDownloadFromList = useCallback(
     async (doc) => {
@@ -554,6 +654,128 @@ function App() {
       }
     },
     [activeSection, sectionConfig, translate],
+  )
+
+  const handlePreviewDocument = useCallback(
+    async (doc) => {
+      const section = sectionConfig[activeSection]
+      if (!section) {
+        return
+      }
+
+      try {
+        setPreviewingId(doc.id)
+        const response = await fetch(
+          `${API_BASE_URL}/${section.endpoint}/${doc.id}/pdf`,
+        )
+
+        if (!response.ok) {
+          throw new Error(translate('pdf.previewError'))
+        }
+
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const previewWindow = window.open(url, '_blank', 'noopener')
+        if (!previewWindow) {
+          throw new Error(translate('preview.blocked'))
+        }
+
+        if (previewUrlRef.current) {
+          window.URL.revokeObjectURL(previewUrlRef.current)
+        }
+        previewUrlRef.current = url
+        previewWindow.focus()
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('pdf.previewError'),
+        })
+      } finally {
+        setPreviewingId(null)
+      }
+    },
+    [activeSection, sectionConfig, translate],
+  )
+
+  const handleEditQuote = useCallback(
+    (doc) => {
+      setEditingQuote(doc)
+      setStatus(null)
+      try {
+        document.querySelector('.section-content')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      } catch {
+        // no-op if document is unavailable (e.g., during SSR)
+      }
+    },
+    [],
+  )
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingQuote(null)
+  }, [])
+
+  const handleUpdateQuote = useCallback(
+    async (quoteId, payload) => {
+      const config = sectionConfig.quotes
+      if (!config) {
+        return false
+      }
+
+      setIsSubmitting(true)
+      setStatus(null)
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/${config.endpoint}/${quoteId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        })
+
+        if (!response.ok) {
+          let detail = translate('sections.quotes.updateError')
+          try {
+            const responseBody = await response.json()
+            detail = responseBody?.title || responseBody?.detail || detail
+          } catch {
+            // Ignore parse errors and fall back to default error.
+          }
+          throw new Error(detail)
+        }
+
+        setStatus({ type: 'success', message: translate('sections.quotes.updateSuccess') })
+        await loadSection('quotes')
+        return true
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('sections.quotes.updateError'),
+        })
+        return false
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [loadSection, sectionConfig, translate],
+  )
+
+  const handleQuoteSubmit = useCallback(
+    async (payload) => {
+      if (editingQuote) {
+        const wasSuccessful = await handleUpdateQuote(editingQuote.id, payload)
+        if (wasSuccessful) {
+          setEditingQuote(null)
+        }
+        return wasSuccessful
+      }
+
+      return handleCreate('quotes', payload)
+    },
+    [editingQuote, handleCreate, handleUpdateQuote],
   )
 
   const promptForNcfNumber = useCallback(() => {
@@ -634,65 +856,45 @@ function App() {
     [promptForNcfNumber, sectionConfig, setStatus, translate],
   )
 
-  const handleGenerateInvoiceWord = useCallback(
-    async (doc) => {
-      const quotesConfig = sectionConfig.quotes
-      if (!quotesConfig) {
-        return
-      }
+  const documentExtraActions = useMemo(() => {
+    const previewAction = {
+      label: translate('documentList.preview'),
+      loadingLabel: translate('documentList.previewing'),
+      busyId: previewingId,
+      onClick: handlePreviewDocument,
+      variant: 'button--ghost',
+    }
 
-      const { cancelled, value } = promptForNcfNumber()
-      if (cancelled) {
-        return
-      }
+    if (isQuotesSection) {
+      return [
+        {
+          label: translate('documentList.edit'),
+          loadingLabel: translate('documentList.editing'),
+          busyId: editingQuote?.id ?? null,
+          onClick: handleEditQuote,
+          variant: 'button--ghost',
+        },
+        previewAction,
+        {
+          label: translate('documentList.generateInvoice'),
+          loadingLabel: translate('documentList.generatingInvoice'),
+          busyId: invoiceGeneratingId,
+          onClick: handleGenerateInvoice,
+        },
+      ]
+    }
 
-      if (!value) {
-        setStatus({
-          type: 'error',
-          message: translate('pdf.ncfRequired'),
-        })
-        return
-      }
-
-      try {
-        setInvoiceWordGeneratingId(doc.id)
-        const response = await fetch(
-          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-word?ncfNumber=${encodeURIComponent(
-            value,
-          )}`,
-        )
-
-        if (!response.ok) {
-          throw new Error(translate('pdf.invoiceWordDownloadError'))
-        }
-
-        const blob = await response.blob()
-        const downloadUrl = window.URL.createObjectURL(blob)
-        const link = window.document.createElement('a')
-        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
-        link.href = downloadUrl
-        link.download = `Invoice-${safeNumber}.docx`
-        window.document.body.appendChild(link)
-        link.click()
-        window.document.body.removeChild(link)
-        window.URL.revokeObjectURL(downloadUrl)
-        setStatus({ type: 'success', message: translate('pdf.invoiceWordGenerated') })
-      } catch (error) {
-        setStatus({
-          type: 'error',
-          message: error.message || translate('pdf.invoiceWordDownloadError'),
-        })
-      } finally {
-        setInvoiceWordGeneratingId(null)
-      }
-    },
-    [promptForNcfNumber, sectionConfig, setStatus, translate],
-  )
-
-  const FormComponent = useMemo(
-    () => (activeSection === 'receipts' ? ReceiptForm : InvoiceForm),
-    [activeSection],
-  )
+    return [previewAction]
+  }, [
+    editingQuote?.id,
+    handleEditQuote,
+    handleGenerateInvoice,
+    handlePreviewDocument,
+    invoiceGeneratingId,
+    isQuotesSection,
+    previewingId,
+    translate,
+  ])
 
   const handleSort = useCallback((columnKey) => {
     setSortConfig((previous) => {
@@ -839,7 +1041,7 @@ function App() {
           <p className="muted">{config.empty}</p>
         ) : (
           <DocumentList
-            documents={currentDocuments}
+            documents={paginatedDocuments}
             config={config}
             t={translate}
             formatCurrency={formatCurrency}
@@ -848,42 +1050,37 @@ function App() {
             downloadingId={downloadingId}
             sortConfig={sortConfig}
             onSort={handleSort}
-            extraActions={
-              activeSection === 'quotes'
-                ? [
-                    {
-                      label: translate('documentList.generateInvoice'),
-                      loadingLabel: translate('documentList.generatingInvoice'),
-                      busyId: invoiceGeneratingId,
-                      onClick: handleGenerateInvoice,
-                    },
-                    {
-                      label: translate('documentList.generateInvoiceWord'),
-                      loadingLabel: translate('documentList.generatingInvoiceWord'),
-                      busyId: invoiceWordGeneratingId,
-                      onClick: handleGenerateInvoiceWord,
-                      variant: 'button--ghost',
-                    },
-                  ]
-                : []
-            }
+            extraActions={documentExtraActions}
+            pagination={paginationConfig}
           />
         )}
       </section>
 
       <section className="section-content">
         <div className="section-intro">
-          <h2>{config.createHeading}</h2>
-          <p>{config.createDescription}</p>
+          <h2>{formHeading}</h2>
+          <p>{formDescription}</p>
         </div>
         <BrandPanel note={brandNote} />
 
-        <FormComponent
-          onSubmit={(payload) => handleCreate(activeSection, payload)}
-          isSubmitting={isSubmitting}
-          t={translate}
-        {...(activeSection === 'quotes' ? { defaultCurrency, locale } : {})}
-        />
+        {isQuotesSection ? (
+          <InvoiceForm
+            onSubmit={handleQuoteSubmit}
+            isSubmitting={isSubmitting}
+            t={translate}
+            defaultCurrency={defaultCurrency}
+            locale={locale}
+            initialInvoice={editingQuote}
+            mode={isEditingQuote ? 'edit' : 'create'}
+            onCancelEdit={isEditingQuote ? handleCancelEdit : undefined}
+          />
+        ) : (
+          <ReceiptForm
+            onSubmit={(payload) => handleCreate('receipts', payload)}
+            isSubmitting={isSubmitting}
+            t={translate}
+          />
+        )}
       </section>
     </div>
   )

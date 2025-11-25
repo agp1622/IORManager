@@ -1,8 +1,11 @@
+using System.Linq;
+using IORManager.Data;
 using IORManager.Dtos;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace IORManager.Controllers;
 
@@ -13,15 +16,18 @@ public class InvoicesController : ControllerBase
     private readonly IFinancialDocumentRepository<Invoice> _repository;
     private readonly IFinancialDocumentPdfService _pdfService;
     private readonly IInvoiceNumberGenerator _numberGenerator;
+    private readonly IORManagerContext _context;
 
     public InvoicesController(
         IFinancialDocumentRepository<Invoice> repository,
         IFinancialDocumentPdfService pdfService,
-        IInvoiceNumberGenerator numberGenerator)
+        IInvoiceNumberGenerator numberGenerator,
+        IORManagerContext context)
     {
         _repository = repository;
         _pdfService = pdfService;
         _numberGenerator = numberGenerator;
+        _context = context;
     }
 
     [HttpGet]
@@ -97,6 +103,47 @@ public class InvoicesController : ControllerBase
         var docBytes = _pdfService.GenerateInvoiceWord(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(docBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"Invoice-{invoiceNumber}.docx");
+    }
+
+    [HttpPut("{id:guid}")]
+    public ActionResult<Invoice> UpdateInvoice(Guid id, [FromBody] InvoiceUpdateRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var invoice = _context.Invoices
+            .Include(existing => existing.Lines)
+            .FirstOrDefault(existing => existing.Id == id);
+
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        invoice.Date = request.InvoiceDate;
+        invoice.CustomerName = request.CustomerName;
+        invoice.CurrencyCode = request.CurrencyCode;
+        invoice.CultureName = request.Locale;
+        invoice.ItbisRate = request.ItbisRate;
+
+        var existingLines = invoice.Lines.ToList();
+        if (existingLines.Count > 0)
+        {
+            _context.DocumentLines.RemoveRange(existingLines);
+        }
+        invoice.Lines.Clear();
+
+        foreach (var lineRequest in request.Lines)
+        {
+            invoice.Lines.Add(lineRequest.ToDocumentLine());
+        }
+
+        invoice.RecalculateTotal();
+        _context.SaveChanges();
+
+        return Ok(invoice);
     }
 
     private static string? NormalizeNcfNumber(string? ncfNumber)
