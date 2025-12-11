@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace IORManager.Models;
@@ -12,11 +13,26 @@ public class Invoice : FinancialDocument
     [Column(TypeName = "decimal(5,4)")]
     public decimal? ItbisRate { get; set; }
 
+    [NotMapped]
     public string CustomerName
     {
         get => PartyName;
         set => PartyName = value;
     }
+
+    [MaxLength(300)]
+    public string? CustomerAddress { get; set; }
+
+    [MaxLength(150)]
+    public string? CustomerContact { get; set; }
+
+    [MaxLength(50)]
+    public string? NcfNumber { get; set; }
+
+    public DateTime? InvoiceGeneratedAt { get; set; }
+
+    [NotMapped]
+    public bool InvoiceGenerated => InvoiceGeneratedAt.HasValue;
 
     public List<DocumentLine> Lines { get; set; }
 

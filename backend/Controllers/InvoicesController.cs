@@ -16,17 +16,20 @@ public class InvoicesController : ControllerBase
     private readonly IFinancialDocumentRepository<Invoice> _repository;
     private readonly IFinancialDocumentPdfService _pdfService;
     private readonly IInvoiceNumberGenerator _numberGenerator;
+    private readonly INcfNumberGenerator _ncfNumberGenerator;
     private readonly IORManagerContext _context;
 
     public InvoicesController(
         IFinancialDocumentRepository<Invoice> repository,
         IFinancialDocumentPdfService pdfService,
         IInvoiceNumberGenerator numberGenerator,
+        INcfNumberGenerator ncfNumberGenerator,
         IORManagerContext context)
     {
         _repository = repository;
         _pdfService = pdfService;
         _numberGenerator = numberGenerator;
+        _ncfNumberGenerator = ncfNumberGenerator;
         _context = context;
     }
 
@@ -78,13 +81,13 @@ public class InvoicesController : ControllerBase
     [HttpGet("{id:guid}/invoice-pdf")]
     public ActionResult GetInvoiceDocumentPdf(Guid id, [FromQuery] string? ncfNumber)
     {
-        var invoice = _repository.GetById(id);
+        var invoice = GetInvoiceWithLines(id);
         if (invoice is null)
         {
             return NotFound();
         }
 
-        var normalizedNcf = NormalizeNcfNumber(ncfNumber);
+        var normalizedNcf = EnsureNcfNumber(invoice, ncfNumber);
         var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
@@ -93,13 +96,13 @@ public class InvoicesController : ControllerBase
     [HttpGet("{id:guid}/invoice-word")]
     public ActionResult GetInvoiceDocumentWord(Guid id, [FromQuery] string? ncfNumber)
     {
-        var invoice = _repository.GetById(id);
+        var invoice = GetInvoiceWithLines(id);
         if (invoice is null)
         {
             return NotFound();
         }
 
-        var normalizedNcf = NormalizeNcfNumber(ncfNumber);
+        var normalizedNcf = EnsureNcfNumber(invoice, ncfNumber);
         var docBytes = _pdfService.GenerateInvoiceWord(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(docBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"Invoice-{invoiceNumber}.docx");
@@ -124,9 +127,17 @@ public class InvoicesController : ControllerBase
 
         invoice.Date = request.InvoiceDate;
         invoice.CustomerName = request.CustomerName;
+        invoice.CustomerAddress = request.CustomerAddress;
+        invoice.CustomerContact = request.CustomerContact;
         invoice.CurrencyCode = request.CurrencyCode;
         invoice.CultureName = request.Locale;
         invoice.ItbisRate = request.ItbisRate;
+        var normalizedNcf = NormalizeNcfNumber(request.NcfNumber);
+        invoice.NcfNumber = normalizedNcf;
+        if (!string.IsNullOrWhiteSpace(normalizedNcf))
+        {
+            invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
+        }
 
         var existingLines = invoice.Lines.ToList();
         if (existingLines.Count > 0)
@@ -144,6 +155,50 @@ public class InvoicesController : ControllerBase
         _context.SaveChanges();
 
         return Ok(invoice);
+    }
+
+    private Invoice? GetInvoiceWithLines(Guid id) =>
+        _context.Invoices
+            .Include(existing => existing.Lines)
+            .FirstOrDefault(existing => existing.Id == id);
+
+    [HttpPost("{id:guid}/ncf")]
+    public ActionResult<NcfAssignmentResponse> AssignNcf(Guid id, [FromBody] NcfAssignmentRequest? request)
+    {
+        var invoice = GetInvoiceWithLines(id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        var normalized = NormalizeNcfNumber(request?.NcfNumber);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = _ncfNumberGenerator.GenerateNextNumber();
+        }
+
+        invoice.NcfNumber = normalized;
+        invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
+        _context.SaveChanges();
+
+        return Ok(new NcfAssignmentResponse(invoice.NcfNumber!));
+    }
+
+    private string? EnsureNcfNumber(Invoice invoice, string? requestedNcf)
+    {
+        var normalized = NormalizeNcfNumber(requestedNcf);
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            invoice.NcfNumber = normalized;
+        }
+        else if (string.IsNullOrWhiteSpace(invoice.NcfNumber))
+        {
+            invoice.NcfNumber = _ncfNumberGenerator.GenerateNextNumber();
+        }
+
+        invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
+        _context.SaveChanges();
+        return invoice.NcfNumber;
     }
 
     private static string? NormalizeNcfNumber(string? ncfNumber)

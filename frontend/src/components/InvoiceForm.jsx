@@ -44,8 +44,11 @@ const InvoiceForm = ({
   const formInstanceId = useId()
   const [invoiceDate, setInvoiceDate] = useState(today)
   const [customerName, setCustomerName] = useState('')
+  const [customerAddress, setCustomerAddress] = useState('')
+  const [customerContact, setCustomerContact] = useState('')
   const [currencyCode, setCurrencyCode] = useState(defaultCurrency)
   const [itbisRate, setItbisRate] = useState('')
+  const [ncfNumber, setNcfNumber] = useState('')
   const [lines, setLines] = useState([createEmptyLine()])
   const isEditMode = mode === 'edit' && initialInvoice
 
@@ -56,12 +59,15 @@ const InvoiceForm = ({
         : today
       setInvoiceDate(normalizedDate)
       setCustomerName(initialInvoice.customerName || initialInvoice.partyName || '')
+      setCustomerAddress(initialInvoice.customerAddress || '')
+      setCustomerContact(initialInvoice.customerContact || '')
       setCurrencyCode(initialInvoice.currencyCode || defaultCurrency)
       setItbisRate(
         typeof initialInvoice.itbisRate === 'number'
           ? (Number(initialInvoice.itbisRate) * 100).toString()
           : '',
       )
+      setNcfNumber(initialInvoice.ncfNumber || '')
       const nextLines = Array.isArray(initialInvoice.lines) && initialInvoice.lines.length > 0
         ? initialInvoice.lines.map((line) => ({
             description: line.description ?? '',
@@ -79,8 +85,11 @@ const InvoiceForm = ({
 
     setInvoiceDate(today)
     setCustomerName('')
+    setCustomerAddress('')
+    setCustomerContact('')
     setCurrencyCode(defaultCurrency)
     setItbisRate('')
+    setNcfNumber('')
     setLines([createEmptyLine()])
   }, [initialInvoice, defaultCurrency, today])
 
@@ -119,12 +128,18 @@ const InvoiceForm = ({
       return capped / 100
     })()
 
+    const normalizedAddress = customerAddress.trim()
+    const normalizedContact = customerContact.trim()
+
     const payload = {
       invoiceDate,
       customerName,
+      customerAddress: normalizedAddress || null,
+      customerContact: normalizedContact || null,
       currencyCode,
       locale: initialInvoice?.cultureName || locale,
       itbisRate: normalizedItbisRate,
+      ncfNumber: ncfNumber.trim() || null,
       lines: lines.map((line) => ({
         description: line.description,
         quantity: Number(line.quantity) || 0,
@@ -138,6 +153,8 @@ const InvoiceForm = ({
     if (wasSuccessful && !isEditMode) {
       setInvoiceDate(today)
       setCustomerName('')
+      setCustomerAddress('')
+      setCustomerContact('')
       setCurrencyCode(defaultCurrency)
       setItbisRate('')
       setLines([createEmptyLine()])
@@ -173,6 +190,24 @@ const InvoiceForm = ({
           />
         </label>
         <label>
+          {t('invoiceForm.customerAddressLabel')}
+          <textarea
+            value={customerAddress}
+            onChange={(event) => setCustomerAddress(event.target.value)}
+            placeholder={t('invoiceForm.customerAddressPlaceholder')}
+            rows="2"
+          />
+        </label>
+        <label>
+          {t('invoiceForm.customerContactLabel')}
+          <input
+            type="text"
+            value={customerContact}
+            onChange={(event) => setCustomerContact(event.target.value)}
+            placeholder={t('invoiceForm.customerContactPlaceholder')}
+          />
+        </label>
+        <label>
           {t('invoiceForm.currencyLabel')}
           <select
             value={currencyCode}
@@ -198,6 +233,16 @@ const InvoiceForm = ({
             placeholder={t('invoiceForm.itbisPlaceholder')}
           />
           <p className="input-hint">{t('invoiceForm.itbisHint')}</p>
+        </label>
+        <label>
+          {t('invoiceForm.ncfLabel')}
+          <input
+            type="text"
+            value={ncfNumber}
+            onChange={(event) => setNcfNumber(event.target.value)}
+            placeholder={t('invoiceForm.ncfPlaceholder')}
+          />
+          <p className="input-hint">{t('invoiceForm.ncfHint')}</p>
         </label>
       </div>
 

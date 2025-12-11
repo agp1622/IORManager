@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace IORManager.Models;
 
 public class Receipt : FinancialDocument
@@ -7,6 +9,7 @@ public class Receipt : FinancialDocument
         Payments = new List<ReceiptPayment>();
     }
 
+    [NotMapped]
     public string CustomerName
     {
         get => PartyName;

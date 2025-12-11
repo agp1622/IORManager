@@ -18,6 +18,7 @@ public class IORManagerContext : DbContext
     public DbSet<DocumentLine> DocumentLines => Set<DocumentLine>();
     public DbSet<ReceiptPayment> ReceiptPayments => Set<ReceiptPayment>();
     public DbSet<InvoiceNumberSequence> InvoiceNumberSequences => Set<InvoiceNumberSequence>();
+    public DbSet<NcfSequence> NcfSequences => Set<NcfSequence>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -27,6 +28,7 @@ public class IORManagerContext : DbContext
         ConfigureDocumentLines(modelBuilder);
         ConfigureReceipts(modelBuilder);
         ConfigureInvoiceNumberSequence(modelBuilder);
+        ConfigureNcfSequence(modelBuilder);
     }
 
     private static void ConfigureFinancialDocuments(ModelBuilder modelBuilder)
@@ -46,6 +48,9 @@ public class IORManagerContext : DbContext
                 .HasValue<Invoice>("Invoice")
                 .HasValue<PurchaseOrder>("PurchaseOrder")
                 .HasValue<Receipt>("Receipt");
+
+            builder.HasIndex(document => document.Number)
+                .IsUnique();
 
             builder.Property(document => document.Date)
                 .HasConversion(converter)
@@ -91,6 +96,16 @@ public class IORManagerContext : DbContext
             builder.HasKey(sequence => sequence.Id);
             builder.Property(sequence => sequence.Id).ValueGeneratedNever();
             builder.HasData(new InvoiceNumberSequence { Id = 1, NextNumber = 1 });
+        });
+    }
+
+    private static void ConfigureNcfSequence(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<NcfSequence>(builder =>
+        {
+            builder.HasKey(sequence => sequence.Id);
+            builder.Property(sequence => sequence.Id).ValueGeneratedNever();
+            builder.HasData(new NcfSequence { Id = 1, NextNumber = 1 });
         });
     }
 }

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace IORManager.Models;
 
 public class PurchaseOrder : FinancialDocument
@@ -7,6 +9,7 @@ public class PurchaseOrder : FinancialDocument
         Lines = new List<DocumentLine>();
     }
 
+    [NotMapped]
     public string SupplierName
     {
         get => PartyName;

@@ -4,6 +4,7 @@ using IORManager.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace IORManager.Migrations
 {
     [DbContext(typeof(IORManagerContext))]
-    partial class IORManagerContextModelSnapshot : ModelSnapshot
+    [Migration("20251210044838_AddInvoiceGenerationMetadata")]
+    partial class AddInvoiceGenerationMetadata
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -100,9 +103,6 @@ namespace IORManager.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Number")
-                        .IsUnique();
-
                     b.ToTable("FinancialDocument");
 
                     b.HasDiscriminator<string>("DocumentType").HasValue("FinancialDocument");
@@ -188,6 +188,10 @@ namespace IORManager.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime?>("InvoiceGeneratedAt")
                         .HasColumnType("datetime2");
 
@@ -205,6 +209,10 @@ namespace IORManager.Migrations
                 {
                     b.HasBaseType("IORManager.Models.FinancialDocument");
 
+                    b.Property<string>("SupplierName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.HasDiscriminator().HasValue("PurchaseOrder");
                 });
 
@@ -212,8 +220,18 @@ namespace IORManager.Migrations
                 {
                     b.HasBaseType("IORManager.Models.FinancialDocument");
 
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ReferenceNumber")
                         .HasColumnType("nvarchar(max)");
+
+                    b.ToTable("FinancialDocument", t =>
+                        {
+                            t.Property("CustomerName")
+                                .HasColumnName("Receipt_CustomerName");
+                        });
 
                     b.HasDiscriminator().HasValue("Receipt");
                 });

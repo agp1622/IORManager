@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import InvoiceForm from './components/InvoiceForm'
 import ReceiptForm from './components/ReceiptForm'
+import Modal from './components/Modal'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
 import PapavelagLogo from './assets/papavelag-logo.svg'
@@ -68,33 +69,6 @@ const createSectionConfig = (t) => ({
   },
 })
 
-const normalizeNcfInput = (value) => {
-  if (typeof value !== 'string') {
-    return ''
-  }
-
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return ''
-  }
-
-  const prefix = 'NCF'
-  if (trimmed.length >= prefix.length && trimmed.slice(0, prefix.length).toUpperCase() === prefix) {
-    const suffix = trimmed.slice(prefix.length)
-    if (!/[A-Za-z0-9]/.test(suffix)) {
-      return ''
-    }
-    return `${prefix}${suffix}`
-  }
-
-  if (!/[A-Za-z0-9]/.test(trimmed)) {
-    return ''
-  }
-
-  const joiner = /^[A-Za-z0-9]/.test(trimmed[0]) ? ' ' : ''
-  return `${prefix}${joiner}${trimmed}`
-}
-
 const DocumentList = ({
   documents,
   config,
@@ -108,6 +82,8 @@ const DocumentList = ({
   onSort,
   pagination,
 }) => {
+  const isQuoteList = config?.endpoint === 'Invoices'
+
   const getAriaSort = (key) => {
     if (!sortConfig || sortConfig.key !== key) {
       return 'none'
@@ -158,6 +134,9 @@ const DocumentList = ({
             <th scope="col" aria-sort={getAriaSort('currency')}>
               {renderSortButton(t('documentList.currency'), 'currency')}
             </th>
+            <th scope="col" aria-sort={getAriaSort('ncf')}>
+              {renderSortButton(t('documentList.ncfLabel'), 'ncf')}
+            </th>
             <th scope="col">{t('documentList.actions')}</th>
           </tr>
         </thead>
@@ -168,10 +147,26 @@ const DocumentList = ({
             const partyName =
               document.partyName || document.customerName || document.supplierName || '—'
             const isDownloading = downloadingId === document.id
+            const invoiceGenerated = Boolean(
+              document.invoiceGeneratedAt || document.ncfNumber || document.invoiceGenerated,
+            )
+            const ncfNumber = document.ncfNumber
 
             return (
               <tr key={document.id}>
-                <td data-heading={t('documentList.number')}>{document.number}</td>
+                <td data-heading={t('documentList.number')}>
+                  <div className="document-number">
+                    <span>{document.number}</span>
+                    {isQuoteList && invoiceGenerated ? (
+                      <span className="pill pill--success">{t('documentList.invoiceReady')}</span>
+                    ) : null}
+                    {isQuoteList && ncfNumber ? (
+                      <span className="pill pill--muted">
+                        {ncfNumber}
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
                 <td data-heading={t('documentList.date')}>
                   {formatDate(document.date, cultureName)}
                 </td>
@@ -181,6 +176,9 @@ const DocumentList = ({
                 </td>
                 <td data-heading={t('documentList.currency')}>
                   {currencyCode || '—'}
+                </td>
+                <td data-heading={t('documentList.ncfLabel')}>
+                  {ncfNumber || '—'}
                 </td>
                 <td data-heading={t('documentList.actions')} className="document-table__actions">
                   <button
@@ -193,19 +191,25 @@ const DocumentList = ({
                       ? t('documentList.downloading')
                       : t('documentList.downloadPdf')}
                   </button>
-                  {extraActions.map((action, index) => (
-                    <button
-                      key={`${action.label}-${index}`}
-                      type="button"
-                      className={`button ${action.variant ?? ''}`}
-                      onClick={() => action.onClick(document)}
-                      disabled={action.busyId === document.id}
-                    >
-                      {action.busyId === document.id
-                        ? action.loadingLabel
-                        : action.label}
-                    </button>
-                  ))}
+                  {extraActions.map((action, index) => {
+                    const resolveLabel = (value) =>
+                      typeof value === 'function' ? value(document) : value
+                    const isBusy = action.busyId === document.id
+                    const actionLabel = resolveLabel(action.label)
+                    const loadingLabel = resolveLabel(action.loadingLabel)
+
+                    return (
+                      <button
+                        key={`${actionLabel}-${index}`}
+                        type="button"
+                        className={`button ${action.variant ?? ''}`}
+                        onClick={() => action.onClick(document)}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? loadingLabel : actionLabel}
+                      </button>
+                    )
+                  })}
                 </td>
               </tr>
             )
@@ -264,14 +268,22 @@ function App() {
   const [error, setError] = useState(null)
   const [status, setStatus] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '' })
+  const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '', ncf: '' })
   const [downloadingId, setDownloadingId] = useState(null)
   const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
   const [editingQuote, setEditingQuote] = useState(null)
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
   const [pageBySection, setPageBySection] = useState({ quotes: 1, receipts: 1 })
   const previewUrlRef = useRef(null)
   const [previewingId, setPreviewingId] = useState(null)
+  const [ncfDialog, setNcfDialog] = useState({
+    isOpen: false,
+    document: null,
+    value: '',
+    isLoading: false,
+    error: null,
+  })
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -353,12 +365,13 @@ function App() {
   }, [activeSection, loadSection])
 
   useEffect(() => {
-    setFilters({ search: '', client: '', number: '', date: '' })
+    setFilters({ search: '', client: '', number: '', date: '', ncf: '' })
   }, [activeSection])
 
   useEffect(() => {
     if (activeSection !== 'quotes') {
       setEditingQuote(null)
+      setIsQuoteModalOpen(false)
     }
   }, [activeSection])
 
@@ -471,6 +484,7 @@ function App() {
     const clientTerm = filters.client.trim().toLowerCase()
     const numberTerm = filters.number.trim().toLowerCase()
     const dateTerm = filters.date
+    const ncfTerm = filters.ncf.trim().toLowerCase()
 
     const normalizeDate = (value) => {
       if (!value) {
@@ -495,10 +509,12 @@ function App() {
       const partyLower = partyName.toLowerCase()
       const numberLower = (document.number || '').toLowerCase()
       const normalizedDate = normalizeDate(document.date)
+      const normalizedNcf = (document.ncfNumber || '').toLowerCase()
 
       const matchesClient = !clientTerm || partyLower.includes(clientTerm)
       const matchesNumber = !numberTerm || numberLower.includes(numberTerm)
       const matchesDate = !dateTerm || normalizedDate === dateTerm
+      const matchesNcf = !ncfTerm || normalizedNcf.includes(ncfTerm)
 
       let matchesSearch = true
       if (searchTerm) {
@@ -508,6 +524,9 @@ function App() {
           (document.referenceNumber || '').toLowerCase(),
           (document.currencyCode || '').toLowerCase(),
           (document.id || '').toLowerCase(),
+          (document.customerAddress || '').toLowerCase(),
+          (document.customerContact || '').toLowerCase(),
+          (document.ncfNumber || '').toLowerCase(),
         ]
 
         if (Array.isArray(document.lines)) {
@@ -528,7 +547,7 @@ function App() {
         matchesSearch = searchable.some((value) => value && value.includes(searchTerm))
       }
 
-      return matchesClient && matchesNumber && matchesDate && matchesSearch
+      return matchesClient && matchesNumber && matchesDate && matchesNcf && matchesSearch
     })
   }, [documents, activeSection, filters])
 
@@ -553,6 +572,8 @@ function App() {
           return Number(document.totalAmount ?? 0)
         case 'currency':
           return (document.currencyCode || '').toLowerCase()
+        case 'ncf':
+          return (document.ncfNumber || '').toLowerCase()
         default:
           return 0
       }
@@ -701,20 +722,28 @@ function App() {
     (doc) => {
       setEditingQuote(doc)
       setStatus(null)
-      try {
-        document.querySelector('.section-content')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        })
-      } catch {
-        // no-op if document is unavailable (e.g., during SSR)
-      }
+      setIsQuoteModalOpen(true)
     },
     [],
   )
 
+  const handleOpenQuoteModal = useCallback(() => {
+    setEditingQuote(null)
+    setStatus(null)
+    setIsQuoteModalOpen(true)
+  }, [])
+
+  const handleResumeEdit = useCallback(() => {
+    setIsQuoteModalOpen(true)
+  }, [])
+
+  const handleCloseQuoteModal = useCallback(() => {
+    setIsQuoteModalOpen(false)
+  }, [])
+
   const handleCancelEdit = useCallback(() => {
     setEditingQuote(null)
+    setIsQuoteModalOpen(false)
   }, [])
 
   const handleUpdateQuote = useCallback(
@@ -769,61 +798,33 @@ function App() {
         const wasSuccessful = await handleUpdateQuote(editingQuote.id, payload)
         if (wasSuccessful) {
           setEditingQuote(null)
+          setIsQuoteModalOpen(false)
         }
         return wasSuccessful
       }
 
-      return handleCreate('quotes', payload)
+      const created = await handleCreate('quotes', payload)
+      if (created) {
+        setIsQuoteModalOpen(false)
+      }
+      return created
     },
     [editingQuote, handleCreate, handleUpdateQuote],
   )
 
-  const promptForNcfNumber = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return { cancelled: true }
-    }
-
-    const defaultValue = 'NCF '
-    const userInput = window.prompt(translate('pdf.ncfPrompt'), defaultValue)
-
-    if (userInput === null) {
-      return { cancelled: true }
-    }
-
-    const normalized = normalizeNcfInput(userInput)
-    if (!normalized) {
-      return { cancelled: false, value: null }
-    }
-
-    return { cancelled: false, value: normalized }
-  }, [translate])
-
   const handleGenerateInvoice = useCallback(
-    async (doc) => {
+    async (doc, ncfOverride = null) => {
       const quotesConfig = sectionConfig.quotes
       if (!quotesConfig) {
-        return
-      }
-
-      const { cancelled, value } = promptForNcfNumber()
-      if (cancelled) {
-        return
-      }
-
-      if (!value) {
-        setStatus({
-          type: 'error',
-          message: translate('pdf.ncfRequired'),
-        })
         return
       }
 
       try {
         setInvoiceGeneratingId(doc.id)
         const response = await fetch(
-          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-pdf?ncfNumber=${encodeURIComponent(
-            value,
-          )}`,
+          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-pdf${
+            ncfOverride ? `?ncfNumber=${encodeURIComponent(ncfOverride)}` : ''
+          }`,
         )
 
         if (!response.ok) {
@@ -844,6 +845,7 @@ function App() {
           type: 'success',
           message: translate('pdf.invoiceGenerated'),
         })
+        await loadSection('quotes')
       } catch (error) {
         setStatus({
           type: 'error',
@@ -853,8 +855,102 @@ function App() {
         setInvoiceGeneratingId(null)
       }
     },
-    [promptForNcfNumber, sectionConfig, setStatus, translate],
+    [loadSection, sectionConfig, setStatus, translate],
   )
+
+  const ensureNcfAssignment = useCallback(
+    async (docId, ncfValue) => {
+      const quotesConfig = sectionConfig.quotes
+      if (!quotesConfig) {
+        throw new Error(translate('pdf.ncfAssignError'))
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/${quotesConfig.endpoint}/${docId}/ncf`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ncfNumber: ncfValue || null }),
+        },
+      )
+
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        const detail =
+          body?.title || body?.detail || body?.message || translate('pdf.ncfAssignError')
+        throw new Error(detail)
+      }
+
+      return body?.ncfNumber || body?.ncf || body?.value || ''
+    },
+    [sectionConfig, translate],
+  )
+
+  const handleOpenNcfDialog = useCallback(
+    async (doc) => {
+      setNcfDialog({
+        isOpen: true,
+        document: doc,
+        value: '',
+        isLoading: true,
+        error: null,
+      })
+
+      try {
+        const assigned = await ensureNcfAssignment(doc.id, doc.ncfNumber)
+        setNcfDialog((current) => ({
+          ...current,
+          value: assigned,
+          isLoading: false,
+          document: { ...doc, ncfNumber: assigned },
+        }))
+        await loadSection('quotes')
+      } catch (error) {
+        setNcfDialog((current) => ({
+          ...current,
+          isLoading: false,
+          error: error.message || translate('pdf.ncfAssignError'),
+        }))
+      }
+    },
+    [ensureNcfAssignment, loadSection, translate],
+  )
+
+  const handleCancelNcfDialog = useCallback(() => {
+    setNcfDialog({
+      isOpen: false,
+      document: null,
+      value: '',
+      isLoading: false,
+      error: null,
+    })
+  }, [])
+
+  const handleConfirmNcfDialog = useCallback(async () => {
+    if (!ncfDialog.document) {
+      return
+    }
+
+    try {
+      setNcfDialog((current) => ({ ...current, isLoading: true, error: null }))
+      const assigned = await ensureNcfAssignment(ncfDialog.document.id, ncfDialog.value)
+      await handleGenerateInvoice({ ...ncfDialog.document, ncfNumber: assigned }, assigned)
+      setNcfDialog({
+        isOpen: false,
+        document: null,
+        value: '',
+        isLoading: false,
+        error: null,
+      })
+      await loadSection('quotes')
+    } catch (error) {
+      setNcfDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: error.message || translate('pdf.ncfAssignError'),
+      }))
+    }
+  }, [ensureNcfAssignment, handleGenerateInvoice, loadSection, ncfDialog.document, ncfDialog.value, translate])
 
   const documentExtraActions = useMemo(() => {
     const previewAction = {
@@ -876,10 +972,14 @@ function App() {
         },
         previewAction,
         {
-          label: translate('documentList.generateInvoice'),
+          label: (doc) =>
+            doc?.invoiceGeneratedAt || doc?.ncfNumber
+              ? translate('documentList.downloadInvoice')
+              : translate('documentList.generateInvoice'),
           loadingLabel: translate('documentList.generatingInvoice'),
           busyId: invoiceGeneratingId,
-          onClick: handleGenerateInvoice,
+          onClick: (doc) =>
+            doc?.ncfNumber ? handleGenerateInvoice(doc, doc.ncfNumber) : handleOpenNcfDialog(doc),
         },
       ]
     }
@@ -1015,11 +1115,22 @@ function App() {
                 }
               />
             </label>
+            <label>
+              {translate('filters.ncfLabel')}
+              <input
+                type="text"
+                value={filters.ncf}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, ncf: event.target.value }))
+                }
+                placeholder={translate('filters.ncfPlaceholder')}
+              />
+            </label>
           </div>
           <button
             type="button"
             className="button button--secondary"
-            onClick={() => setFilters({ search: '', client: '', number: '', date: '' })}
+            onClick={() => setFilters({ search: '', client: '', number: '', date: '', ncf: '' })}
           >
             {translate('filters.clear')}
           </button>
@@ -1064,6 +1175,58 @@ function App() {
         <BrandPanel note={brandNote} />
 
         {isQuotesSection ? (
+          <div className="quote-cta">
+            <div className="quote-cta__copy">
+              <p>{translate('invoiceForm.modalCtaDescription')}</p>
+              {isEditingQuote ? (
+                <div className="form-hint form-hint--warning">
+                  {translate('invoiceForm.editingLabel')}{' '}
+                  <span className="form-hint__strong">
+                    {editingQuote?.number || translate('sections.quotes.singular')}
+                  </span>
+                </div>
+              ) : (
+                <div className="form-hint">{translate('invoiceForm.modalCtaTitle')}</div>
+              )}
+            </div>
+            <div className="quote-cta__actions">
+              <button
+                type="button"
+                className="button"
+                onClick={isEditingQuote ? handleResumeEdit : handleOpenQuoteModal}
+              >
+                {isEditingQuote
+                  ? translate('invoiceForm.resumeEdit')
+                  : translate('invoiceForm.openModal')}
+              </button>
+              {isEditingQuote ? (
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  onClick={handleCancelEdit}
+                >
+                  {translate('invoiceForm.clearEdit')}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <ReceiptForm
+            onSubmit={(payload) => handleCreate('receipts', payload)}
+            isSubmitting={isSubmitting}
+            t={translate}
+          />
+        )}
+      </section>
+
+      {isQuotesSection ? (
+        <Modal
+          isOpen={isQuoteModalOpen}
+          onClose={handleCloseQuoteModal}
+          title={formHeading}
+          description={formDescription}
+          eyebrow={config.title}
+        >
           <InvoiceForm
             onSubmit={handleQuoteSubmit}
             isSubmitting={isSubmitting}
@@ -1074,14 +1237,58 @@ function App() {
             mode={isEditingQuote ? 'edit' : 'create'}
             onCancelEdit={isEditingQuote ? handleCancelEdit : undefined}
           />
-        ) : (
-          <ReceiptForm
-            onSubmit={(payload) => handleCreate('receipts', payload)}
-            isSubmitting={isSubmitting}
-            t={translate}
-          />
-        )}
-      </section>
+        </Modal>
+      ) : null}
+      {ncfDialog.isOpen ? (
+        <Modal
+          isOpen={ncfDialog.isOpen}
+          onClose={ncfDialog.isLoading ? undefined : handleCancelNcfDialog}
+          title={translate('pdf.ncfDialogTitle')}
+          description={translate('pdf.ncfDialogDescription')}
+          eyebrow={config.title}
+        >
+          <div className="modal-body">
+            {ncfDialog.error ? (
+              <div className="banner banner--error" role="alert">
+                {ncfDialog.error}
+              </div>
+            ) : null}
+            <label className="modal-input">
+              {translate('documentList.ncfLabel')}
+              <input
+                type="text"
+                value={ncfDialog.value}
+                onChange={(event) =>
+                  setNcfDialog((current) => ({ ...current, value: event.target.value }))
+                }
+                placeholder={translate('invoiceForm.ncfPlaceholder')}
+                disabled={ncfDialog.isLoading}
+              />
+            </label>
+            <p className="input-hint">{translate('invoiceForm.ncfHint')}</p>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={handleCancelNcfDialog}
+                disabled={ncfDialog.isLoading}
+              >
+                {translate('pdf.ncfDialogCancel')}
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleConfirmNcfDialog}
+                disabled={ncfDialog.isLoading || !ncfDialog.value.trim()}
+              >
+                {ncfDialog.isLoading
+                  ? translate('documentList.generatingInvoice')
+                  : translate('pdf.ncfDialogConfirm')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

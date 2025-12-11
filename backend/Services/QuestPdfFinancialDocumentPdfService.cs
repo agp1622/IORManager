@@ -67,6 +67,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         var subtotalLabel = Localize(culture, "Invoice Subtotal", "Subtotal");
         var itbisRateLabel = Localize(culture, "ITBIS Rate", "Tasa ITBIS");
         var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
+        var addressLabel = Localize(culture, "Address", "Dirección");
+        var contactLabel = Localize(culture, "Contact", "Contacto");
 
         using var ms = new MemoryStream();
         using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document, true))
@@ -80,6 +82,14 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             body.Append(CreateLabelValueParagraph(resources.DateLabel, invoice.Date.ToString("D", culture)));
             body.Append(CreateLabelValueParagraph(resources.ExpirationLabel, invoice.ExpirationDate.ToString("D", culture)));
             body.Append(CreateLabelValueParagraph(resources.CustomerLabel, invoice.CustomerName));
+            if (!string.IsNullOrWhiteSpace(invoice.CustomerAddress))
+            {
+                body.Append(CreateLabelValueParagraph(addressLabel, invoice.CustomerAddress));
+            }
+            if (!string.IsNullOrWhiteSpace(invoice.CustomerContact))
+            {
+                body.Append(CreateLabelValueParagraph(contactLabel, invoice.CustomerContact));
+            }
             body.Append(CreateLabelValueParagraph(Localize(culture, "Currency", "Moneda"), invoice.CurrencyCode));
             var displayNcf = ncfNumber?.Trim();
             if (!string.IsNullOrWhiteSpace(displayNcf))
@@ -121,6 +131,15 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             ? invoice.Number
             : DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
 
+        var invoiceTotals = GetInvoiceTotals(invoice);
+        var subtotalLabel = isQuote
+            ? Localize(culture, "Quote Subtotal", "Subtotal de cotización")
+            : Localize(culture, "Invoice Subtotal", "Subtotal de factura");
+        var itbisRateLabel = Localize(culture, "ITBIS Rate", "Tasa ITBIS");
+        var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
+        var addressLabel = Localize(culture, "Address", "Dirección");
+        var contactLabel = Localize(culture, "Contact", "Contacto");
+
         var metadata = new List<(string Label, string Value)>
         {
             (resources.NumberLabel, documentNumber),
@@ -128,13 +147,14 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             (resources.ExpirationLabel, invoice.ExpirationDate.ToString("d", culture))
         };
         metadata.Add((resources.CustomerLabel, invoice.CustomerName));
-
-        var invoiceTotals = GetInvoiceTotals(invoice);
-        var subtotalLabel = isQuote
-            ? Localize(culture, "Quote Subtotal", "Subtotal de cotización")
-            : Localize(culture, "Invoice Subtotal", "Subtotal de factura");
-        var itbisRateLabel = Localize(culture, "ITBIS Rate", "Tasa ITBIS");
-        var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
+        if (!string.IsNullOrWhiteSpace(invoice.CustomerAddress))
+        {
+            metadata.Add((addressLabel, invoice.CustomerAddress));
+        }
+        if (!string.IsNullOrWhiteSpace(invoice.CustomerContact))
+        {
+            metadata.Add((contactLabel, invoice.CustomerContact));
+        }
 
         var totals = new List<(string Label, string Value)>
         {
