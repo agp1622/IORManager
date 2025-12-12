@@ -9,7 +9,7 @@ public class DocumentLine
     public int Id { get; set; }
 
     [Required]
-    [MaxLength(1000)]
+    [Column(TypeName = "nvarchar(max)")]
     public string Description { get; set; } = string.Empty;
 
     [Range(1, int.MaxValue)]
