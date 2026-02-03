@@ -44,6 +44,10 @@ public class InvoicesController : ControllerBase
         return invoice is not null ? Ok(invoice) : NotFound();
     }
 
+    [HttpGet("next-ncf")]
+    public ActionResult<NcfAssignmentResponse> GetNextNcf()
+        => Ok(new NcfAssignmentResponse(_ncfNumberGenerator.PeekNextNumber()));
+
     [HttpPost]
     public ActionResult<InvoiceCreateResponse> CreateInvoice([FromBody] InvoiceCreateRequest request)
     {
@@ -53,6 +57,16 @@ public class InvoicesController : ControllerBase
         }
 
         var invoice = request.ToInvoice();
+        invoice.NcfNumber = NormalizeNcfNumber(invoice.NcfNumber);
+        if (!string.IsNullOrWhiteSpace(invoice.NcfNumber) &&
+            IsDuplicateNcf(invoice.NcfNumber, invoice.Id))
+        {
+            return DuplicateNcfConflict(invoice.NcfNumber);
+        }
+
+        invoice.InvoiceGeneratedAt = string.IsNullOrWhiteSpace(invoice.NcfNumber)
+            ? null
+            : DateTime.UtcNow;
         invoice.Number = _numberGenerator.GenerateNextNumber();
 
         var savedInvoice = _repository.Add(invoice);
@@ -87,7 +101,11 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var normalizedNcf = EnsureNcfNumber(invoice, ncfNumber);
+        if (!TryAssignNcfNumber(invoice, ncfNumber, out var normalizedNcf, out var errorResult))
+        {
+            return errorResult!;
+        }
+
         var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
@@ -102,7 +120,11 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var normalizedNcf = EnsureNcfNumber(invoice, ncfNumber);
+        if (!TryAssignNcfNumber(invoice, ncfNumber, out var normalizedNcf, out var errorResult))
+        {
+            return errorResult!;
+        }
+
         var docBytes = _pdfService.GenerateInvoiceWord(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(docBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"Invoice-{invoiceNumber}.docx");
@@ -133,11 +155,16 @@ public class InvoicesController : ControllerBase
         invoice.CultureName = request.Locale;
         invoice.ItbisRate = request.ItbisRate;
         var normalizedNcf = NormalizeNcfNumber(request.NcfNumber);
-        invoice.NcfNumber = normalizedNcf;
-        if (!string.IsNullOrWhiteSpace(normalizedNcf))
+        if (!string.IsNullOrWhiteSpace(normalizedNcf) &&
+            IsDuplicateNcf(normalizedNcf, invoice.Id))
         {
-            invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
+            return DuplicateNcfConflict(normalizedNcf);
         }
+
+        invoice.NcfNumber = normalizedNcf;
+        invoice.InvoiceGeneratedAt = string.IsNullOrWhiteSpace(normalizedNcf)
+            ? null
+            : invoice.InvoiceGeneratedAt ?? DateTime.UtcNow;
 
         var existingLines = invoice.Lines.ToList();
         if (existingLines.Count > 0)
@@ -171,35 +198,77 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var normalized = NormalizeNcfNumber(request?.NcfNumber);
-        if (string.IsNullOrWhiteSpace(normalized))
+        if (!TryAssignNcfNumber(invoice, request?.NcfNumber, out var normalized, out var errorResult))
         {
-            normalized = _ncfNumberGenerator.GenerateNextNumber();
+            return errorResult!;
         }
 
-        invoice.NcfNumber = normalized;
-        invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
-        _context.SaveChanges();
-
-        return Ok(new NcfAssignmentResponse(invoice.NcfNumber!));
+        return Ok(new NcfAssignmentResponse(normalized!));
     }
 
-    private string? EnsureNcfNumber(Invoice invoice, string? requestedNcf)
+    private bool TryAssignNcfNumber(
+        Invoice invoice,
+        string? requestedNcf,
+        out string? normalizedNcf,
+        out ActionResult? errorResult)
     {
-        var normalized = NormalizeNcfNumber(requestedNcf);
-        if (!string.IsNullOrWhiteSpace(normalized))
+        normalizedNcf = NormalizeNcfNumber(requestedNcf);
+
+        if (!string.IsNullOrWhiteSpace(normalizedNcf) &&
+            IsDuplicateNcf(normalizedNcf, invoice.Id))
         {
-            invoice.NcfNumber = normalized;
+            errorResult = DuplicateNcfConflict(normalizedNcf);
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedNcf))
+        {
+            invoice.NcfNumber = normalizedNcf;
         }
         else if (string.IsNullOrWhiteSpace(invoice.NcfNumber))
         {
             invoice.NcfNumber = _ncfNumberGenerator.GenerateNextNumber();
+            normalizedNcf = invoice.NcfNumber;
+        }
+        else
+        {
+            normalizedNcf = invoice.NcfNumber;
+        }
+
+        if (string.IsNullOrWhiteSpace(invoice.NcfNumber))
+        {
+            errorResult = BadRequest(new ProblemDetails
+            {
+                Title = "NCF is required",
+                Detail = "An NCF value could not be determined.",
+            });
+            return false;
+        }
+
+        if (IsDuplicateNcf(invoice.NcfNumber!, invoice.Id))
+        {
+            errorResult = DuplicateNcfConflict(invoice.NcfNumber!);
+            return false;
         }
 
         invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
         _context.SaveChanges();
-        return invoice.NcfNumber;
+        normalizedNcf = invoice.NcfNumber;
+        errorResult = null;
+        return true;
     }
+
+    private bool IsDuplicateNcf(string normalizedNcf, Guid? excludingId) =>
+        _context.Invoices.Any(invoice =>
+            invoice.NcfNumber == normalizedNcf &&
+            (!excludingId.HasValue || invoice.Id != excludingId.Value));
+
+    private ActionResult DuplicateNcfConflict(string normalizedNcf) =>
+        Conflict(new ProblemDetails
+        {
+            Title = "Duplicate NCF",
+            Detail = $"The NCF \"{normalizedNcf}\" is already assigned to another invoice.",
+        });
 
     private static string? NormalizeNcfNumber(string? ncfNumber)
     {

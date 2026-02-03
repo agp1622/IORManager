@@ -271,6 +271,7 @@ function App() {
   const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '', ncf: '' })
   const [downloadingId, setDownloadingId] = useState(null)
   const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
+  const [invoiceWordGeneratingId, setInvoiceWordGeneratingId] = useState(null)
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
   const [editingQuote, setEditingQuote] = useState(null)
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
@@ -283,6 +284,7 @@ function App() {
     value: '',
     isLoading: false,
     error: null,
+    mode: 'pdf',
   })
 
   const formatCurrency = useCallback(
@@ -858,6 +860,75 @@ function App() {
     [loadSection, sectionConfig, setStatus, translate],
   )
 
+  const handleGenerateInvoiceWord = useCallback(
+    async (doc) => {
+      const quotesConfig = sectionConfig.quotes
+      if (!quotesConfig) {
+        return
+      }
+
+      if (!doc?.ncfNumber) {
+        setStatus({
+          type: 'error',
+          message: translate('pdf.ncfRequired'),
+        })
+        return
+      }
+
+      try {
+        setInvoiceWordGeneratingId(doc.id)
+        const response = await fetch(
+          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-word?ncfNumber=${encodeURIComponent(doc.ncfNumber)}`,
+        )
+
+        if (!response.ok) {
+          throw new Error(translate('pdf.invoiceWordDownloadError'))
+        }
+
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        const link = window.document.createElement('a')
+        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
+        link.href = downloadUrl
+        link.download = `Invoice-${safeNumber}.docx`
+        window.document.body.appendChild(link)
+        link.click()
+        window.document.body.removeChild(link)
+        window.URL.revokeObjectURL(downloadUrl)
+        setStatus({
+          type: 'success',
+          message: translate('pdf.invoiceWordGenerated'),
+        })
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('pdf.invoiceWordDownloadError'),
+        })
+      } finally {
+        setInvoiceWordGeneratingId(null)
+      }
+    },
+    [sectionConfig, translate],
+  )
+
+  const fetchSuggestedNcf = useCallback(async () => {
+    const quotesConfig = sectionConfig.quotes
+    if (!quotesConfig) {
+      throw new Error(translate('pdf.ncfAssignError'))
+    }
+
+    const response = await fetch(`${API_BASE_URL}/${quotesConfig.endpoint}/next-ncf`)
+    const body = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      const detail =
+        body?.title || body?.detail || body?.message || translate('pdf.ncfAssignError')
+      throw new Error(detail)
+    }
+
+    return body?.ncfNumber || body?.ncf || body?.value || ''
+  }, [sectionConfig, translate])
+
   const ensureNcfAssignment = useCallback(
     async (docId, ncfValue) => {
       const quotesConfig = sectionConfig.quotes
@@ -887,33 +958,50 @@ function App() {
   )
 
   const handleOpenNcfDialog = useCallback(
-    async (doc) => {
+    async (doc, mode = 'pdf') => {
+      const existingValue = doc?.ncfNumber || ''
+      const shouldFetchSuggestion = !existingValue
+
       setNcfDialog({
         isOpen: true,
         document: doc,
-        value: '',
-        isLoading: true,
+        value: existingValue,
+        isLoading: false,
         error: null,
+        mode,
       })
 
+      if (!shouldFetchSuggestion) {
+        return
+      }
+
       try {
-        const assigned = await ensureNcfAssignment(doc.id, doc.ncfNumber)
-        setNcfDialog((current) => ({
-          ...current,
-          value: assigned,
-          isLoading: false,
-          document: { ...doc, ncfNumber: assigned },
-        }))
-        await loadSection('quotes')
+        const suggested = await fetchSuggestedNcf()
+        setNcfDialog((current) => {
+          if (!current.isOpen || current.document?.id !== doc?.id) {
+            return current
+          }
+
+          if (current.value.trim()) {
+            return current
+          }
+
+          return { ...current, value: suggested }
+        })
       } catch (error) {
-        setNcfDialog((current) => ({
-          ...current,
-          isLoading: false,
-          error: error.message || translate('pdf.ncfAssignError'),
-        }))
+        setNcfDialog((current) => {
+          if (!current.isOpen || current.document?.id !== doc?.id) {
+            return current
+          }
+
+          return {
+            ...current,
+            error: error.message || translate('pdf.ncfAssignError'),
+          }
+        })
       }
     },
-    [ensureNcfAssignment, loadSection, translate],
+    [fetchSuggestedNcf, translate],
   )
 
   const handleCancelNcfDialog = useCallback(() => {
@@ -923,6 +1011,7 @@ function App() {
       value: '',
       isLoading: false,
       error: null,
+      mode: 'pdf',
     })
   }, [])
 
@@ -934,13 +1023,18 @@ function App() {
     try {
       setNcfDialog((current) => ({ ...current, isLoading: true, error: null }))
       const assigned = await ensureNcfAssignment(ncfDialog.document.id, ncfDialog.value)
-      await handleGenerateInvoice({ ...ncfDialog.document, ncfNumber: assigned }, assigned)
+      if (ncfDialog.mode === 'word') {
+        await handleGenerateInvoiceWord({ ...ncfDialog.document, ncfNumber: assigned }, assigned)
+      } else {
+        await handleGenerateInvoice({ ...ncfDialog.document, ncfNumber: assigned }, assigned)
+      }
       setNcfDialog({
         isOpen: false,
         document: null,
         value: '',
         isLoading: false,
         error: null,
+        mode: 'pdf',
       })
       await loadSection('quotes')
     } catch (error) {
@@ -950,7 +1044,16 @@ function App() {
         error: error.message || translate('pdf.ncfAssignError'),
       }))
     }
-  }, [ensureNcfAssignment, handleGenerateInvoice, loadSection, ncfDialog.document, ncfDialog.value, translate])
+  }, [
+    ensureNcfAssignment,
+    handleGenerateInvoice,
+    handleGenerateInvoiceWord,
+    loadSection,
+    ncfDialog.document,
+    ncfDialog.mode,
+    ncfDialog.value,
+    translate,
+  ])
 
   const documentExtraActions = useMemo(() => {
     const previewAction = {
@@ -978,8 +1081,17 @@ function App() {
               : translate('documentList.generateInvoice'),
           loadingLabel: translate('documentList.generatingInvoice'),
           busyId: invoiceGeneratingId,
-          onClick: (doc) =>
-            doc?.ncfNumber ? handleGenerateInvoice(doc, doc.ncfNumber) : handleOpenNcfDialog(doc),
+          onClick: (doc) => handleOpenNcfDialog(doc, 'pdf'),
+        },
+        {
+          label: (doc) =>
+            doc?.invoiceGeneratedAt || doc?.ncfNumber
+              ? translate('documentList.downloadInvoiceWord')
+              : translate('documentList.downloadInvoiceWord'),
+          loadingLabel: translate('documentList.generatingInvoiceWord'),
+          busyId: invoiceWordGeneratingId,
+          onClick: (doc) => handleOpenNcfDialog(doc, 'word'),
+          variant: 'button--ghost',
         },
       ]
     }
@@ -988,9 +1100,10 @@ function App() {
   }, [
     editingQuote?.id,
     handleEditQuote,
-    handleGenerateInvoice,
+    handleOpenNcfDialog,
     handlePreviewDocument,
     invoiceGeneratingId,
+    invoiceWordGeneratingId,
     isQuotesSection,
     previewingId,
     translate,
@@ -1282,7 +1395,9 @@ function App() {
                 disabled={ncfDialog.isLoading || !ncfDialog.value.trim()}
               >
                 {ncfDialog.isLoading
-                  ? translate('documentList.generatingInvoice')
+                  ? ncfDialog.mode === 'word'
+                    ? translate('documentList.generatingInvoiceWord')
+                    : translate('documentList.generatingInvoice')
                   : translate('pdf.ncfDialogConfirm')}
               </button>
             </div>

@@ -26,6 +26,7 @@ public class IORManagerContext : DbContext
 
         ConfigureFinancialDocuments(modelBuilder);
         ConfigureDocumentLines(modelBuilder);
+        ConfigureInvoices(modelBuilder);
         ConfigureReceipts(modelBuilder);
         ConfigureInvoiceNumberSequence(modelBuilder);
         ConfigureNcfSequence(modelBuilder);
@@ -75,6 +76,16 @@ public class IORManagerContext : DbContext
                 .HasForeignKey(line => line.PurchaseOrderId)
                 // Prevent multiple cascade paths to FinancialDocument table on SQL Server.
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+    }
+
+    private static void ConfigureInvoices(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Invoice>(builder =>
+        {
+            builder.HasIndex(invoice => invoice.NcfNumber)
+                .IsUnique()
+                .HasFilter("[NcfNumber] IS NOT NULL");
         });
     }
 
