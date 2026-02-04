@@ -44,7 +44,7 @@ public class Invoice : FinancialDocument
                 ? DateOnly.FromDateTime(InvoiceGeneratedAt.Value)
                 : Date;
 
-            return baseDate.AddDays(30);
+            return baseDate.AddYears(1);
         }
     }
 
