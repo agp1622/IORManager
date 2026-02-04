@@ -36,7 +36,17 @@ public class Invoice : FinancialDocument
 
     public List<DocumentLine> Lines { get; set; }
 
-    public DateOnly ExpirationDate => Date.AddDays(30);
+    public DateOnly ExpirationDate
+    {
+        get
+        {
+            var baseDate = InvoiceGeneratedAt.HasValue
+                ? DateOnly.FromDateTime(InvoiceGeneratedAt.Value)
+                : Date;
+
+            return baseDate.AddDays(30);
+        }
+    }
 
     public (decimal Subtotal, decimal NormalizedItbisRate, decimal ItbisAmount) CalculateFinancials()
     {
