@@ -148,6 +148,7 @@ public class InvoicesController : ControllerBase
         }
 
         invoice.Date = request.InvoiceDate;
+        invoice.ExpirationDateOverride = request.ExpirationDate;
         invoice.CustomerName = request.CustomerName;
         invoice.CustomerAddress = request.CustomerAddress;
         invoice.CustomerContact = request.CustomerContact;

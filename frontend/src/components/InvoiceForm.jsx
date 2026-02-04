@@ -43,6 +43,7 @@ const InvoiceForm = ({
   const today = new Date().toISOString().split('T')[0]
   const formInstanceId = useId()
   const [invoiceDate, setInvoiceDate] = useState(today)
+  const [expirationDate, setExpirationDate] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerAddress, setCustomerAddress] = useState('')
   const [customerContact, setCustomerContact] = useState('')
@@ -52,12 +53,56 @@ const InvoiceForm = ({
   const [lines, setLines] = useState([createEmptyLine()])
   const isEditMode = mode === 'edit' && initialInvoice
 
+  const normalizeDateOnly = (value, fallback) => {
+    if (!value) {
+      return fallback
+    }
+
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value
+    }
+
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) {
+      return fallback
+    }
+
+    return parsed.toISOString().split('T')[0]
+  }
+
+  const computeAutoExpiration = (dateValue, generatedAtValue) => {
+    const baseValue = generatedAtValue || dateValue
+    if (!baseValue) {
+      return ''
+    }
+
+    const normalized = normalizeDateOnly(baseValue, null)
+    if (!normalized) {
+      return ''
+    }
+
+    const baseDate = new Date(`${normalized}T00:00:00Z`)
+    if (Number.isNaN(baseDate.getTime())) {
+      return ''
+    }
+
+    const next = new Date(baseDate)
+    next.setUTCFullYear(next.getUTCFullYear() + 1)
+    return next.toISOString().split('T')[0]
+  }
+
+  const autoExpirationDate = computeAutoExpiration(
+    invoiceDate,
+    isEditMode ? initialInvoice?.invoiceGeneratedAt : null,
+  )
+
   useEffect(() => {
     if (initialInvoice) {
-      const normalizedDate = initialInvoice.date
-        ? new Date(initialInvoice.date).toISOString().split('T')[0]
-        : today
+      const normalizedDate = normalizeDateOnly(initialInvoice.date, today)
       setInvoiceDate(normalizedDate)
+      setExpirationDate(
+        normalizeDateOnly(initialInvoice.expirationDateOverride, ''),
+      )
       setCustomerName(initialInvoice.customerName || initialInvoice.partyName || '')
       setCustomerAddress(initialInvoice.customerAddress || '')
       setCustomerContact(initialInvoice.customerContact || '')
@@ -84,6 +129,7 @@ const InvoiceForm = ({
     }
 
     setInvoiceDate(today)
+    setExpirationDate('')
     setCustomerName('')
     setCustomerAddress('')
     setCustomerContact('')
@@ -133,6 +179,7 @@ const InvoiceForm = ({
 
     const payload = {
       invoiceDate,
+      expirationDate: expirationDate || null,
       customerName,
       customerAddress: normalizedAddress || null,
       customerContact: normalizedContact || null,
@@ -152,6 +199,7 @@ const InvoiceForm = ({
 
     if (wasSuccessful && !isEditMode) {
       setInvoiceDate(today)
+      setExpirationDate('')
       setCustomerName('')
       setCustomerAddress('')
       setCustomerContact('')
@@ -178,6 +226,20 @@ const InvoiceForm = ({
             onChange={(event) => setInvoiceDate(event.target.value)}
             required
           />
+        </label>
+        <label>
+          {t('invoiceForm.expirationDateLabel')}
+          <input
+            type="date"
+            value={expirationDate}
+            onChange={(event) => setExpirationDate(event.target.value)}
+          />
+          <p className="input-hint">
+            {t('invoiceForm.expirationDateHint')}
+            {autoExpirationDate
+              ? ` (${t('invoiceForm.expirationDateAuto')} ${autoExpirationDate})`
+              : ''}
+          </p>
         </label>
         <label>
           {t('invoiceForm.customerNameLabel')}

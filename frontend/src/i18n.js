@@ -112,6 +112,9 @@ const translations = {
     },
     invoiceForm: {
       invoiceDateLabel: 'Quote date',
+      expirationDateLabel: 'Expiration date (optional)',
+      expirationDateHint: 'Leave blank to use the default expiration date.',
+      expirationDateAuto: 'Auto:',
       customerNameLabel: 'Customer name',
       customerNamePlaceholder: 'Acme Corp',
       customerAddressLabel: 'Customer address',
@@ -325,6 +328,9 @@ const translations = {
     },
     invoiceForm: {
       invoiceDateLabel: 'Fecha de la cotización',
+      expirationDateLabel: 'Fecha de vencimiento (opcional)',
+      expirationDateHint: 'Déjalo vacío para usar la fecha de vencimiento predeterminada.',
+      expirationDateAuto: 'Automático:',
       customerNameLabel: 'Nombre del cliente',
       customerNamePlaceholder: 'Empresa Ejemplo',
       customerAddressLabel: 'Dirección del cliente',

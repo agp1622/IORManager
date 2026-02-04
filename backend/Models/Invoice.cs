@@ -36,10 +36,18 @@ public class Invoice : FinancialDocument
 
     public List<DocumentLine> Lines { get; set; }
 
+    public DateOnly? ExpirationDateOverride { get; set; }
+
+    [NotMapped]
     public DateOnly ExpirationDate
     {
         get
         {
+            if (ExpirationDateOverride.HasValue)
+            {
+                return ExpirationDateOverride.Value;
+            }
+
             var baseDate = InvoiceGeneratedAt.HasValue
                 ? DateOnly.FromDateTime(InvoiceGeneratedAt.Value)
                 : Date;

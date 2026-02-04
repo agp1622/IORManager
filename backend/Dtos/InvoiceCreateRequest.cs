@@ -9,6 +9,9 @@ public record InvoiceCreateRequest
     public DateOnly InvoiceDate { get; init; }
         = DateOnly.FromDateTime(DateTime.UtcNow);
 
+    public DateOnly? ExpirationDate { get; init; }
+        = null;
+
     [Required]
     public string CustomerName { get; init; } = string.Empty;
 
@@ -42,6 +45,7 @@ public record InvoiceCreateRequest
         {
             Id = Guid.NewGuid(),
             Date = InvoiceDate,
+            ExpirationDateOverride = ExpirationDate,
             CustomerName = CustomerName,
             CustomerAddress = CustomerAddress,
             CustomerContact = CustomerContact,
@@ -88,6 +92,9 @@ public record InvoiceUpdateRequest
     [Required]
     public DateOnly InvoiceDate { get; init; }
         = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    public DateOnly? ExpirationDate { get; init; }
+        = null;
 
     [Required]
     public string CustomerName { get; init; } = string.Empty;

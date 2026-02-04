@@ -86,6 +86,21 @@ public class IORManagerContext : DbContext
             builder.HasIndex(invoice => invoice.NcfNumber)
                 .IsUnique()
                 .HasFilter("[NcfNumber] IS NOT NULL");
+
+            var expirationConverter = new ValueConverter<DateOnly?, DateTime?>(
+                dateOnly => dateOnly.HasValue ? dateOnly.Value.ToDateTime(TimeOnly.MinValue) : null,
+                dateTime => dateTime.HasValue
+                    ? DateOnly.FromDateTime(DateTime.SpecifyKind(dateTime.Value, DateTimeKind.Utc))
+                    : null);
+
+            var expirationComparer = new ValueComparer<DateOnly?>(
+                (left, right) => left == right,
+                dateOnly => dateOnly.HasValue ? dateOnly.Value.GetHashCode() : 0,
+                dateOnly => dateOnly);
+
+            builder.Property(invoice => invoice.ExpirationDateOverride)
+                .HasConversion(expirationConverter)
+                .Metadata.SetValueComparer(expirationComparer);
         });
     }
 
