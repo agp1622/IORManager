@@ -70,6 +70,14 @@ public class Program
                 query => query.Include(invoice => invoice.Lines));
         });
 
+        services.AddScoped<IFinancialDocumentRepository<Quote>>(provider =>
+        {
+            var context = provider.GetRequiredService<IORManagerContext>();
+            return new EfFinancialDocumentRepository<Quote>(
+                context,
+                query => query.Include(quote => quote.Lines));
+        });
+
         services.AddScoped<IFinancialDocumentRepository<Receipt>>(provider =>
         {
             var context = provider.GetRequiredService<IORManagerContext>();

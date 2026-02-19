@@ -21,38 +21,58 @@ public class Invoice : FinancialDocument
     }
 
     [MaxLength(300)]
-    public string? CustomerAddress { get; set; }
+    [Required]
+    public string CustomerAddress { get; set; } = string.Empty;
 
     [MaxLength(150)]
-    public string? CustomerContact { get; set; }
+    [Required]
+    public string CustomerContact { get; set; } = string.Empty;
+
+    public Guid? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+
+    public Guid? QuoteId { get; set; }
+
+    [NotMapped]
+    public string? QuoteNumber { get; set; }
 
     [MaxLength(50)]
     public string? NcfNumber { get; set; }
+
+    [MaxLength(10)]
+    public string? NcfCategory { get; set; }
 
     public DateTime? InvoiceGeneratedAt { get; set; }
 
     [NotMapped]
     public bool InvoiceGenerated => InvoiceGeneratedAt.HasValue;
 
+    [NotMapped]
+    public DateOnly QuoteDate => Date;
+
+    [NotMapped]
+    public DateOnly InvoiceDate => InvoiceGeneratedAt.HasValue
+        ? DateOnly.FromDateTime(InvoiceGeneratedAt.Value)
+        : DateOnly.FromDateTime(DateTime.UtcNow);
+
     public List<DocumentLine> Lines { get; set; }
 
     public DateOnly? ExpirationDateOverride { get; set; }
+
+    [NotMapped]
+    public DateOnly QuoteExpirationDate => QuoteDate.AddMonths(1);
+
+    [NotMapped]
+    public DateOnly InvoiceExpirationDate => new DateOnly(InvoiceDate.Year, 12, 31);
 
     [NotMapped]
     public DateOnly ExpirationDate
     {
         get
         {
-            if (ExpirationDateOverride.HasValue)
-            {
-                return ExpirationDateOverride.Value;
-            }
-
-            var baseDate = InvoiceGeneratedAt.HasValue
-                ? DateOnly.FromDateTime(InvoiceGeneratedAt.Value)
-                : Date;
-
-            return baseDate.AddYears(1);
+            return InvoiceGenerated
+                ? InvoiceExpirationDate
+                : QuoteExpirationDate;
         }
     }
 

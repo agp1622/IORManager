@@ -69,6 +69,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
         var addressLabel = Localize(culture, "Address", "Dirección");
         var contactLabel = Localize(culture, "Contact", "Contacto");
+        var invoiceDocumentDate = invoice.InvoiceDate;
+        var invoiceExpirationDate = invoice.InvoiceExpirationDate;
 
         using var ms = new MemoryStream();
         using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document, true))
@@ -79,8 +81,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
 
             body.Append(CreateHeadingParagraph($"{resources.TitleLabel} {documentNumber}"));
             body.Append(CreateLabelValueParagraph(resources.NumberLabel, documentNumber));
-            body.Append(CreateLabelValueParagraph(resources.DateLabel, invoice.Date.ToString("D", culture)));
-            body.Append(CreateLabelValueParagraph(resources.ExpirationLabel, invoice.ExpirationDate.ToString("D", culture)));
+            body.Append(CreateLabelValueParagraph(resources.DateLabel, invoiceDocumentDate.ToString("D", culture)));
+            body.Append(CreateLabelValueParagraph(resources.ExpirationLabel, invoiceExpirationDate.ToString("D", culture)));
             body.Append(CreateLabelValueParagraph(resources.CustomerLabel, invoice.CustomerName));
             if (!string.IsNullOrWhiteSpace(invoice.CustomerAddress))
             {
@@ -94,7 +96,11 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             var displayNcf = ncfNumber?.Trim();
             if (!string.IsNullOrWhiteSpace(displayNcf))
             {
-                body.Append(CreateLabelValueParagraph(Localize(culture, "NCF", "NCF"), displayNcf, NcfWordColor));
+                body.Append(CreateLabelValueParagraph(
+                    Localize(culture, "NCF", "NCF"),
+                    displayNcf,
+                    NcfWordColor,
+                    valueSeparator: "-"));
             }
             body.Append(new Paragraph(new Run(new Text(string.Empty))));
             body.Append(CreateHeadingParagraph(Localize(culture, "Line Items", "Conceptos")));
@@ -130,6 +136,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         var documentNumber = isQuote
             ? invoice.Number
             : DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+        var documentDate = isQuote ? invoice.QuoteDate : invoice.InvoiceDate;
+        var expirationDate = isQuote
+            ? invoice.QuoteExpirationDate
+            : invoice.InvoiceExpirationDate;
 
         var invoiceTotals = GetInvoiceTotals(invoice);
         var subtotalLabel = isQuote
@@ -143,8 +153,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         var metadata = new List<(string Label, string Value)>
         {
             (resources.NumberLabel, documentNumber),
-            (resources.DateLabel, invoice.Date.ToString("d", culture)),
-            (resources.ExpirationLabel, invoice.ExpirationDate.ToString("d", culture))
+            (resources.DateLabel, documentDate.ToString("d", culture)),
+            (resources.ExpirationLabel, expirationDate.ToString("d", culture))
         };
         metadata.Add((resources.CustomerLabel, invoice.CustomerName));
         if (!string.IsNullOrWhiteSpace(invoice.CustomerAddress))
@@ -390,7 +400,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                         {
                             col.Item().AlignRight().Text(text =>
                             {
-                                text.Span($"{Localize(culture, "NCF", "NCF")}: ").SemiBold().FontColor(NcfFieldColor);
+                                text.Span($"{Localize(culture, "NCF", "NCF")}-").SemiBold().FontColor(NcfFieldColor);
                                 text.Span(displayNcf).FontColor(NcfFieldColor);
                             });
                         }
@@ -765,7 +775,11 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         };
     }
 
-    private static Paragraph CreateLabelValueParagraph(string label, string value, string? hexColor = null)
+    private static Paragraph CreateLabelValueParagraph(
+        string label,
+        string value,
+        string? hexColor = null,
+        string valueSeparator = ": ")
     {
         var paragraph = new Paragraph();
         var labelRunProps = new RunProperties(new Bold());
@@ -774,7 +788,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             labelRunProps.AppendChild(new WordColor { Val = hexColor });
         }
 
-        paragraph.Append(new Run(labelRunProps, new Text($"{label ?? string.Empty}: ")));
+        paragraph.Append(new Run(labelRunProps, new Text($"{label ?? string.Empty}{valueSeparator}")));
 
         var valueRunProps = new RunProperties();
         if (!string.IsNullOrEmpty(hexColor))

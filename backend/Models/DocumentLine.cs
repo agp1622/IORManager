@@ -25,6 +25,9 @@ public class DocumentLine
     public Guid? InvoiceId { get; set; }
     public Invoice? Invoice { get; set; }
 
+    public Guid? QuoteId { get; set; }
+    public Quote? Quote { get; set; }
+
     public Guid? PurchaseOrderId { get; set; }
     public PurchaseOrder? PurchaseOrder { get; set; }
 

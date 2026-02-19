@@ -1,11 +1,12 @@
 using IORManager.Data;
 using IORManager.Models;
+using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace IORManager.Services;
 
 public class NcfNumberGenerator : INcfNumberGenerator
 {
-    private static readonly object SequenceLock = new();
     private readonly IORManagerContext _context;
 
     public NcfNumberGenerator(IORManagerContext context)
@@ -13,32 +14,48 @@ public class NcfNumberGenerator : INcfNumberGenerator
         _context = context;
     }
 
-    public string GenerateNextNumber()
+    public string GenerateNextNumber(string categoryCode)
     {
-        lock (SequenceLock)
-        {
-            var sequence = GetOrCreateSequence();
-            return GetNextFormattedNumber(sequence, advanceSequence: true);
-        }
+        var normalizedCategory = NcfCategoryCatalog.NormalizeCategoryCode(categoryCode);
+        return ExecuteWithSerializableTransaction(normalizedCategory, advanceSequence: true);
     }
 
-    public string PeekNextNumber()
+    public string PeekNextNumber(string categoryCode)
     {
-        lock (SequenceLock)
-        {
-            var sequence = GetOrCreateSequence();
-            return GetNextFormattedNumber(sequence, advanceSequence: false);
-        }
+        var normalizedCategory = NcfCategoryCatalog.NormalizeCategoryCode(categoryCode);
+        return ExecuteWithSerializableTransaction(normalizedCategory, advanceSequence: false);
     }
 
-    private NcfSequence GetOrCreateSequence()
+    private string ExecuteWithSerializableTransaction(string categoryCode, bool advanceSequence)
     {
-        var sequence = _context.NcfSequences.SingleOrDefault();
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return strategy.Execute(() =>
+        {
+            using var transaction = _context.Database.BeginTransaction(IsolationLevel.Serializable);
+
+            var sequence = GetOrCreateSequence(categoryCode);
+            var generated = GetNextFormattedNumber(sequence, categoryCode, advanceSequence);
+
+            transaction.Commit();
+            return generated;
+        });
+    }
+
+    private NcfSequence GetOrCreateSequence(string categoryCode)
+    {
+        var sequence = _context.NcfSequences
+            .SingleOrDefault(existing => existing.CategoryCode == categoryCode);
+
         if (sequence is null)
         {
+            var nextId = _context.NcfSequences
+                .Select(existing => (int?)existing.Id)
+                .Max() ?? 0;
+
             sequence = new NcfSequence
             {
-                Id = 1,
+                Id = nextId + 1,
+                CategoryCode = categoryCode,
                 NextNumber = 1
             };
             _context.NcfSequences.Add(sequence);
@@ -48,14 +65,17 @@ public class NcfNumberGenerator : INcfNumberGenerator
         return sequence;
     }
 
-    private string GetNextFormattedNumber(NcfSequence sequence, bool advanceSequence)
+    private string GetNextFormattedNumber(
+        NcfSequence sequence,
+        string categoryCode,
+        bool advanceSequence)
     {
         var candidate = sequence.NextNumber;
         string formatted;
 
         do
         {
-            formatted = FormatNcfNumber(candidate);
+            formatted = NcfCategoryCatalog.FormatNumber(categoryCode, candidate);
             candidate++;
         }
         while (_context.Invoices.Any(invoice => invoice.NcfNumber == formatted));
@@ -68,6 +88,4 @@ public class NcfNumberGenerator : INcfNumberGenerator
 
         return formatted;
     }
-
-    private static string FormatNcfNumber(int value) => $"NCF-{value:00000000}";
 }

@@ -23,11 +23,13 @@ public record InvoiceCreateRequest
     [RegularExpression("en-US|es-DO")]
     public string Locale { get; init; } = "es-DO";
 
+    [Required]
     [MaxLength(300)]
-    public string? CustomerAddress { get; init; }
+    public string CustomerAddress { get; init; } = string.Empty;
 
+    [Required]
     [MaxLength(150)]
-    public string? CustomerContact { get; init; }
+    public string CustomerContact { get; init; } = string.Empty;
 
     [MinLength(1)]
     public IReadOnlyList<InvoiceLineRequest> Lines { get; init; } = Array.Empty<InvoiceLineRequest>();
@@ -35,9 +37,24 @@ public record InvoiceCreateRequest
     [Range(typeof(decimal), "0.0", "1.0")]
     public decimal? ItbisRate { get; init; }
 
-    [MaxLength(50)]
-    public string? NcfNumber { get; init; }
-        = null;
+    public Quote ToQuote()
+    {
+        var quote = new Quote
+        {
+            Id = Guid.NewGuid(),
+            Date = InvoiceDate,
+            CustomerName = CustomerName,
+            CustomerAddress = CustomerAddress.Trim(),
+            CustomerContact = CustomerContact.Trim(),
+            CurrencyCode = CurrencyCode,
+            CultureName = Locale,
+            Lines = Lines.Select(line => line.ToDocumentLine()).ToList(),
+            ItbisRate = ItbisRate
+        };
+
+        quote.RecalculateTotal();
+        return quote;
+    }
 
     public Invoice ToInvoice()
     {
@@ -45,15 +62,16 @@ public record InvoiceCreateRequest
         {
             Id = Guid.NewGuid(),
             Date = InvoiceDate,
-            ExpirationDateOverride = ExpirationDate,
+            ExpirationDateOverride = null,
             CustomerName = CustomerName,
-            CustomerAddress = CustomerAddress,
-            CustomerContact = CustomerContact,
+            CustomerAddress = CustomerAddress.Trim(),
+            CustomerContact = CustomerContact.Trim(),
             CurrencyCode = CurrencyCode,
             CultureName = Locale,
             Lines = Lines.Select(line => line.ToDocumentLine()).ToList(),
             ItbisRate = ItbisRate,
-            NcfNumber = string.IsNullOrWhiteSpace(NcfNumber) ? null : NcfNumber.Trim()
+            NcfNumber = null,
+            NcfCategory = null
         };
 
         invoice.RecalculateTotal();
@@ -107,20 +125,18 @@ public record InvoiceUpdateRequest
     [RegularExpression("en-US|es-DO")]
     public string Locale { get; init; } = "es-DO";
 
+    [Required]
     [MaxLength(300)]
-    public string? CustomerAddress { get; init; }
+    public string CustomerAddress { get; init; } = string.Empty;
 
+    [Required]
     [MaxLength(150)]
-    public string? CustomerContact { get; init; }
+    public string CustomerContact { get; init; } = string.Empty;
 
     [MinLength(1)]
     public IReadOnlyList<InvoiceLineRequest> Lines { get; init; } = Array.Empty<InvoiceLineRequest>();
 
     [Range(typeof(decimal), "0.0", "1.0")]
     public decimal? ItbisRate { get; init; }
-        = null;
-
-    [MaxLength(50)]
-    public string? NcfNumber { get; init; }
         = null;
 }

@@ -1,4 +1,5 @@
 using IORManager.Models;
+using IORManager.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -13,6 +14,8 @@ public class IORManagerContext : DbContext
     }
 
     public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<Quote> Quotes => Set<Quote>();
+    public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<Receipt> Receipts => Set<Receipt>();
     public DbSet<DocumentLine> DocumentLines => Set<DocumentLine>();
@@ -25,7 +28,9 @@ public class IORManagerContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         ConfigureFinancialDocuments(modelBuilder);
+        ConfigureCustomers(modelBuilder);
         ConfigureDocumentLines(modelBuilder);
+        ConfigureQuotes(modelBuilder);
         ConfigureInvoices(modelBuilder);
         ConfigureReceipts(modelBuilder);
         ConfigureInvoiceNumberSequence(modelBuilder);
@@ -46,6 +51,7 @@ public class IORManagerContext : DbContext
         modelBuilder.Entity<FinancialDocument>(builder =>
         {
             builder.HasDiscriminator<string>("DocumentType")
+                .HasValue<Quote>("Quote")
                 .HasValue<Invoice>("Invoice")
                 .HasValue<PurchaseOrder>("PurchaseOrder")
                 .HasValue<Receipt>("Receipt");
@@ -71,11 +77,25 @@ public class IORManagerContext : DbContext
                 // children, perform explicit deletes in code or create a separate cleanup migration/trigger.
                 .OnDelete(DeleteBehavior.NoAction);
 
+            builder.HasOne(line => line.Quote)
+                .WithMany(quote => quote.Lines)
+                .HasForeignKey(line => line.QuoteId)
+                .OnDelete(DeleteBehavior.NoAction);
+
             builder.HasOne(line => line.PurchaseOrder)
                 .WithMany(purchaseOrder => purchaseOrder.Lines)
                 .HasForeignKey(line => line.PurchaseOrderId)
                 // Prevent multiple cascade paths to FinancialDocument table on SQL Server.
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+    }
+
+    private static void ConfigureCustomers(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Customer>(builder =>
+        {
+            builder.HasIndex(customer => customer.Name)
+                .IsUnique();
         });
     }
 
@@ -86,6 +106,18 @@ public class IORManagerContext : DbContext
             builder.HasIndex(invoice => invoice.NcfNumber)
                 .IsUnique()
                 .HasFilter("[NcfNumber] IS NOT NULL");
+
+            builder.Property(invoice => invoice.NcfCategory)
+                .HasMaxLength(10);
+
+            builder.HasOne(invoice => invoice.Customer)
+                .WithMany(customer => customer.Invoices)
+                .HasForeignKey(invoice => invoice.CustomerId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            builder.HasIndex(invoice => invoice.QuoteId)
+                .IsUnique()
+                .HasFilter("[QuoteId] IS NOT NULL");
 
             var expirationConverter = new ValueConverter<DateOnly?, DateTime?>(
                 dateOnly => dateOnly.HasValue ? dateOnly.Value.ToDateTime(TimeOnly.MinValue) : null,
@@ -101,6 +133,21 @@ public class IORManagerContext : DbContext
             builder.Property(invoice => invoice.ExpirationDateOverride)
                 .HasConversion(expirationConverter)
                 .Metadata.SetValueComparer(expirationComparer);
+        });
+    }
+
+    private static void ConfigureQuotes(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Quote>(builder =>
+        {
+            builder.HasOne(quote => quote.Customer)
+                .WithMany()
+                .HasForeignKey(quote => quote.CustomerId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            builder.HasIndex(quote => quote.ConvertedInvoiceId)
+                .IsUnique()
+                .HasFilter("[ConvertedInvoiceId] IS NOT NULL");
         });
     }
 
@@ -131,7 +178,17 @@ public class IORManagerContext : DbContext
         {
             builder.HasKey(sequence => sequence.Id);
             builder.Property(sequence => sequence.Id).ValueGeneratedNever();
-            builder.HasData(new NcfSequence { Id = 1, NextNumber = 1 });
+            builder.HasIndex(sequence => sequence.CategoryCode)
+                .IsUnique();
+            builder.Property(sequence => sequence.CategoryCode)
+                .HasMaxLength(10)
+                .IsRequired();
+            builder.HasData(new NcfSequence
+            {
+                Id = 1,
+                CategoryCode = NcfCategoryCatalog.DefaultCategoryCode,
+                NextNumber = 1
+            });
         });
     }
 }

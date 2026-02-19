@@ -5,6 +5,13 @@ import Modal from './components/Modal'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
 import PapavelagLogo from './assets/papavelag-logo.svg'
+import {
+  DEFAULT_NCF_CATEGORY,
+  inferNcfCategoryFromNumber,
+  getNcfSequenceLength,
+  NCF_CATEGORY_OPTIONS,
+  normalizeNcfCategory,
+} from './constants/ncfCategories'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5031/api'
 const CURRENCY_CODES = ['USD', 'DOP']
@@ -12,9 +19,21 @@ const ROWS_PER_PAGE = 10
 
 const BRAND_NOTES = {
   quotes: 'Cotizaciones impactantes listas para convertirse en facturas.',
+  invoices: 'Facturas fiscales listas para control, descarga y seguimiento.',
   receipts: 'Recibos elegantes que transmiten confianza y precisión.',
   default: 'Documentos oficiales con el sello PAPAVELAG.',
 }
+
+const getCompactNcfToken = (value) => {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  const compact = value.toUpperCase().replace(/[\s-]/g, '')
+  return compact.startsWith('NCF') ? compact.slice(3) : compact
+}
+
+const sanitizeNcfSuffix = (value) => getCompactNcfToken(value).replace(/\D/g, '')
 
 const getInitialTheme = () => {
   if (typeof window === 'undefined') {
@@ -26,6 +45,22 @@ const getInitialTheme = () => {
   }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
+
+const UiIcon = ({ children, className = 'ui-icon' }) => (
+  <svg
+    className={className}
+    viewBox="0 0 20 20"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+    focusable="false"
+  >
+    {children}
+  </svg>
+)
 
 const BrandPanel = ({ note, variant = 'default' }) => (
   <div className={`brand-panel ${variant === 'compact' ? 'brand-panel--compact' : ''}`}>
@@ -42,7 +77,7 @@ const createSectionConfig = (t) => ({
   quotes: {
     title: t('sections.quotes.title'),
     description: t('sections.quotes.description'),
-    endpoint: 'Invoices',
+    endpoint: 'Quotes',
     singular: t('sections.quotes.singular'),
     partyLabel: t('sections.quotes.partyLabel'),
     loading: t('sections.quotes.loading'),
@@ -52,6 +87,20 @@ const createSectionConfig = (t) => ({
     createDescription: t('sections.quotes.createDescription'),
     createSuccess: t('sections.quotes.createSuccess'),
     createError: t('sections.quotes.createError'),
+  },
+  invoices: {
+    title: t('sections.invoices.title'),
+    description: t('sections.invoices.description'),
+    endpoint: 'Invoices',
+    singular: t('sections.invoices.singular'),
+    partyLabel: t('sections.invoices.partyLabel'),
+    loading: t('sections.invoices.loading'),
+    empty: t('sections.invoices.empty'),
+    loadError: t('sections.invoices.loadError'),
+    createHeading: t('sections.invoices.createHeading'),
+    createDescription: t('sections.invoices.createDescription'),
+    createSuccess: t('sections.invoices.createSuccess'),
+    createError: t('sections.invoices.createError'),
   },
   receipts: {
     title: t('sections.receipts.title'),
@@ -82,7 +131,41 @@ const DocumentList = ({
   onSort,
   pagination,
 }) => {
-  const isQuoteList = config?.endpoint === 'Invoices'
+  const isQuoteList = config?.endpoint === 'Quotes'
+  const isInvoiceList = config?.endpoint === 'Invoices'
+  const [openActionsId, setOpenActionsId] = useState(null)
+
+  useEffect(() => {
+    if (!openActionsId) {
+      return undefined
+    }
+
+    const handleMouseDown = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        return
+      }
+
+      if (target.closest('.document-table__actions')) {
+        return
+      }
+
+      setOpenActionsId(null)
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setOpenActionsId(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [openActionsId])
 
   const getAriaSort = (key) => {
     if (!sortConfig || sortConfig.key !== key) {
@@ -122,6 +205,11 @@ const DocumentList = ({
             <th scope="col" aria-sort={getAriaSort('number')}>
               {renderSortButton(t('documentList.number'), 'number')}
             </th>
+            {isInvoiceList ? (
+              <th scope="col" aria-sort={getAriaSort('quoteNumber')}>
+                {renderSortButton(t('documentList.quoteNumber'), 'quoteNumber')}
+              </th>
+            ) : null}
             <th scope="col" aria-sort={getAriaSort('date')}>
               {renderSortButton(t('documentList.date'), 'date')}
             </th>
@@ -148,9 +236,14 @@ const DocumentList = ({
               document.partyName || document.customerName || document.supplierName || '—'
             const isDownloading = downloadingId === document.id
             const invoiceGenerated = Boolean(
-              document.invoiceGeneratedAt || document.ncfNumber || document.invoiceGenerated,
+              document.convertedAt ||
+              document.convertedInvoiceId ||
+              document.invoiceGeneratedAt ||
+              document.ncfNumber ||
+              document.invoiceGenerated,
             )
             const ncfNumber = document.ncfNumber
+            const quoteNumber = document.quoteNumber || '—'
 
             return (
               <tr key={document.id}>
@@ -167,6 +260,11 @@ const DocumentList = ({
                     ) : null}
                   </div>
                 </td>
+                {isInvoiceList ? (
+                  <td data-heading={t('documentList.quoteNumber')}>
+                    {quoteNumber}
+                  </td>
+                ) : null}
                 <td data-heading={t('documentList.date')}>
                   {formatDate(document.date, cultureName)}
                 </td>
@@ -183,33 +281,61 @@ const DocumentList = ({
                 <td data-heading={t('documentList.actions')} className="document-table__actions">
                   <button
                     type="button"
-                    className="button button--secondary"
-                    onClick={() => onDownloadPdf(document)}
-                    disabled={isDownloading}
+                    className="button button--secondary document-actions-toggle"
+                    onClick={() =>
+                      setOpenActionsId((current) => (current === document.id ? null : document.id))
+                    }
+                    aria-haspopup="menu"
+                    aria-expanded={openActionsId === document.id}
+                    aria-label={t('documentList.actions')}
+                    title={t('documentList.actions')}
                   >
-                    {isDownloading
-                      ? t('documentList.downloading')
-                      : t('documentList.downloadPdf')}
+                    <span aria-hidden="true">⋯</span>
                   </button>
-                  {extraActions.map((action, index) => {
-                    const resolveLabel = (value) =>
-                      typeof value === 'function' ? value(document) : value
-                    const isBusy = action.busyId === document.id
-                    const actionLabel = resolveLabel(action.label)
-                    const loadingLabel = resolveLabel(action.loadingLabel)
 
-                    return (
+                  {openActionsId === document.id ? (
+                    <div className="document-actions-menu" role="menu" aria-label={t('documentList.actions')}>
                       <button
-                        key={`${actionLabel}-${index}`}
                         type="button"
-                        className={`button ${action.variant ?? ''}`}
-                        onClick={() => action.onClick(document)}
-                        disabled={isBusy}
+                        className="document-actions-menu__item"
+                        onClick={() => {
+                          setOpenActionsId(null)
+                          onDownloadPdf(document)
+                        }}
+                        disabled={isDownloading}
                       >
-                        {isBusy ? loadingLabel : actionLabel}
+                        {isDownloading ? t('documentList.downloading') : t('documentList.downloadPdf')}
                       </button>
-                    )
-                  })}
+                      {extraActions.map((action, index) => {
+                        const shouldRender =
+                          typeof action.isVisible === 'function' ? action.isVisible(document) : true
+                        if (!shouldRender) {
+                          return null
+                        }
+
+                        const resolveLabel = (value) =>
+                          typeof value === 'function' ? value(document) : value
+                        const isBusy = action.busyId === document.id
+                        const actionLabel = resolveLabel(action.label)
+                        const loadingLabel = resolveLabel(action.loadingLabel)
+
+                        return (
+                          <button
+                            key={`${actionLabel}-${index}`}
+                            type="button"
+                            className="document-actions-menu__item"
+                            onClick={() => {
+                              setOpenActionsId(null)
+                              action.onClick(document)
+                            }}
+                            disabled={isBusy}
+                          >
+                            {isBusy ? loadingLabel : actionLabel}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
                 </td>
               </tr>
             )
@@ -262,6 +388,7 @@ function App() {
   const [activeSection, setActiveSection] = useState('quotes')
   const [documents, setDocuments] = useState({
     quotes: [],
+    invoices: [],
     receipts: [],
   })
   const [loading, setLoading] = useState(false)
@@ -271,21 +398,40 @@ function App() {
   const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '', ncf: '' })
   const [downloadingId, setDownloadingId] = useState(null)
   const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
-  const [invoiceWordGeneratingId, setInvoiceWordGeneratingId] = useState(null)
+  const [undoingQuoteId, setUndoingQuoteId] = useState(null)
+  const [updatingNcfId, setUpdatingNcfId] = useState(null)
+  const [duplicatingQuoteId, setDuplicatingQuoteId] = useState(null)
+  const [apiNcfCategories, setApiNcfCategories] = useState([])
+  const [customers, setCustomers] = useState([])
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
   const [editingQuote, setEditingQuote] = useState(null)
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
-  const [pageBySection, setPageBySection] = useState({ quotes: 1, receipts: 1 })
+  const [pageBySection, setPageBySection] = useState({ quotes: 1, invoices: 1, receipts: 1 })
   const previewUrlRef = useRef(null)
   const [previewingId, setPreviewingId] = useState(null)
   const [ncfDialog, setNcfDialog] = useState({
     isOpen: false,
+    mode: 'generate',
     document: null,
-    value: '',
+    invoiceId: null,
+    suffix: '',
+    category: DEFAULT_NCF_CATEGORY,
     isLoading: false,
     error: null,
-    mode: 'pdf',
   })
+
+  const ncfCategories = useMemo(() => {
+    if (apiNcfCategories.length > 0) {
+      return apiNcfCategories
+    }
+
+    return NCF_CATEGORY_OPTIONS.map((option) => ({
+      code: option.code,
+      sequenceLength: option.sequenceLength,
+      isElectronic: option.code.startsWith('E'),
+      name: translate(`ncfCategories.${option.code}`),
+    }))
+  }, [apiNcfCategories, translate])
 
   const formatCurrency = useCallback(
     (value, currencyCode, cultureName) => {
@@ -362,9 +508,92 @@ function App() {
     [sectionConfig],
   )
 
+  const loadCustomers = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/Customers`)
+      if (!response.ok) {
+        return
+      }
+
+      const data = await response.json()
+      if (!Array.isArray(data)) {
+        return
+      }
+
+      const byName = new Map()
+      data.forEach((customer) => {
+        const normalized = {
+          id: customer?.id || '',
+          name: typeof customer?.name === 'string' ? customer.name.trim() : '',
+          address: typeof customer?.address === 'string' ? customer.address.trim() : '',
+          contact: typeof customer?.contact === 'string' ? customer.contact.trim() : '',
+        }
+
+        if (!normalized.name) {
+          return
+        }
+
+        const key = normalized.name.toLowerCase()
+        if (!byName.has(key)) {
+          byName.set(key, normalized)
+        }
+      })
+
+      setCustomers(
+        Array.from(byName.values()).sort((left, right) =>
+          left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }),
+        ),
+      )
+    } catch {
+      // Keep autocomplete optional if the customer endpoint is unavailable.
+    }
+  }, [])
+
   useEffect(() => {
     loadSection(activeSection)
   }, [activeSection, loadSection])
+
+  useEffect(() => {
+    loadCustomers()
+  }, [loadCustomers])
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadNcfCategories = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/Invoices/ncf-categories`)
+        if (!response.ok) {
+          return
+        }
+
+        const data = await response.json()
+        if (!isMounted || !Array.isArray(data)) {
+          return
+        }
+
+        const normalized = data
+          .map((entry) => ({
+            code: normalizeNcfCategory(entry?.code, NCF_CATEGORY_OPTIONS),
+            name: typeof entry?.name === 'string' ? entry.name.trim() : '',
+            sequenceLength: Number(entry?.sequenceLength) || 8,
+            isElectronic: Boolean(entry?.isElectronic),
+          }))
+          .filter((entry) => Boolean(entry.code))
+
+        if (normalized.length > 0) {
+          setApiNcfCategories(normalized)
+        }
+      } catch {
+        // Ignore category-loading errors and keep local fallback options.
+      }
+    }
+
+    loadNcfCategories()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   useEffect(() => {
     setFilters({ search: '', client: '', number: '', date: '', ncf: '' })
@@ -466,6 +695,9 @@ function App() {
         }
 
         await loadSection(sectionKey)
+        if (sectionKey === 'quotes') {
+          await loadCustomers()
+        }
         return true
       } catch (requestError) {
         setStatus({
@@ -477,7 +709,7 @@ function App() {
         setIsSubmitting(false)
       }
     },
-    [loadSection, sectionConfig, translate, triggerPdfDownload],
+    [loadCustomers, loadSection, sectionConfig, translate, triggerPdfDownload],
   )
 
   const filteredDocuments = useMemo(() => {
@@ -501,7 +733,7 @@ function App() {
       return parsed.toISOString().slice(0, 10)
     }
 
-    if (!searchTerm && !clientTerm && !numberTerm && !dateTerm) {
+    if (!searchTerm && !clientTerm && !numberTerm && !dateTerm && !ncfTerm) {
       return source
     }
 
@@ -510,11 +742,13 @@ function App() {
         document.partyName || document.customerName || document.supplierName || ''
       const partyLower = partyName.toLowerCase()
       const numberLower = (document.number || '').toLowerCase()
+      const quoteNumberLower = (document.quoteNumber || '').toLowerCase()
       const normalizedDate = normalizeDate(document.date)
       const normalizedNcf = (document.ncfNumber || '').toLowerCase()
 
       const matchesClient = !clientTerm || partyLower.includes(clientTerm)
-      const matchesNumber = !numberTerm || numberLower.includes(numberTerm)
+      const matchesNumber =
+        !numberTerm || numberLower.includes(numberTerm) || quoteNumberLower.includes(numberTerm)
       const matchesDate = !dateTerm || normalizedDate === dateTerm
       const matchesNcf = !ncfTerm || normalizedNcf.includes(ncfTerm)
 
@@ -522,6 +756,7 @@ function App() {
       if (searchTerm) {
         const searchable = [
           numberLower,
+          quoteNumberLower,
           partyLower,
           (document.referenceNumber || '').toLowerCase(),
           (document.currencyCode || '').toLowerCase(),
@@ -564,6 +799,8 @@ function App() {
       switch (key) {
         case 'number':
           return (document.number || '').toLowerCase()
+        case 'quoteNumber':
+          return (document.quoteNumber || '').toLowerCase()
         case 'date': {
           const timestamp = new Date(document.date).getTime()
           return Number.isNaN(timestamp) ? 0 : timestamp
@@ -626,6 +863,8 @@ function App() {
   const currentDocuments = sortedDocuments
   const config = sectionConfig[activeSection]
   const isQuotesSection = activeSection === 'quotes'
+  const isInvoicesSection = activeSection === 'invoices'
+  const isReceiptsSection = activeSection === 'receipts'
   const isEditingQuote = isQuotesSection && Boolean(editingQuote)
   const brandNote =
     BRAND_NOTES[activeSection] ??
@@ -780,6 +1019,7 @@ function App() {
 
         setStatus({ type: 'success', message: translate('sections.quotes.updateSuccess') })
         await loadSection('quotes')
+        await loadCustomers()
         return true
       } catch (error) {
         setStatus({
@@ -791,7 +1031,45 @@ function App() {
         setIsSubmitting(false)
       }
     },
-    [loadSection, sectionConfig, translate],
+    [loadCustomers, loadSection, sectionConfig, translate],
+  )
+
+  const handleDuplicateQuote = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setDuplicatingQuoteId(doc.id)
+        const response = await fetch(`${API_BASE_URL}/Quotes/${doc.id}/duplicate`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('sections.quotes.duplicateError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        setStatus({ type: 'success', message: translate('sections.quotes.duplicateSuccess') })
+        await loadSection('quotes')
+        await loadCustomers()
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('sections.quotes.duplicateError'),
+        })
+      } finally {
+        setDuplicatingQuoteId(null)
+      }
+    },
+    [loadCustomers, loadSection, translate],
   )
 
   const handleQuoteSubmit = useCallback(
@@ -814,110 +1092,195 @@ function App() {
     [editingQuote, handleCreate, handleUpdateQuote],
   )
 
+  const downloadInvoicePdfById = useCallback(
+    async (invoiceId, fileNameSeed) => {
+      const response = await fetch(`${API_BASE_URL}/Invoices/${invoiceId}/pdf`)
+      if (!response.ok) {
+        throw new Error(translate('pdf.invoiceDownloadError'))
+      }
+
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = window.document.createElement('a')
+      const safeNumber = fileNameSeed?.replace?.(/\s+/g, '-') ?? invoiceId
+      link.href = downloadUrl
+      link.download = `Invoice-${safeNumber}.pdf`
+      window.document.body.appendChild(link)
+      link.click()
+      window.document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+    },
+    [translate],
+  )
+
+  const convertQuoteToInvoice = useCallback(
+    async (quoteId, ncfValue, ncfCategory) => {
+      const normalizedCategory =
+        normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
+
+      const response = await fetch(`${API_BASE_URL}/Quotes/${quoteId}/convert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ncfNumber: ncfValue || null,
+          ncfCategory: normalizedCategory,
+        }),
+      })
+
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        const detail = body?.title || body?.detail || body?.message || translate('pdf.ncfAssignError')
+        throw new Error(detail)
+      }
+
+      return {
+        invoiceId: body?.invoiceId || body?.id || '',
+        invoiceNumber: body?.invoiceNumber || body?.number || '',
+        ncfNumber: body?.ncfNumber || body?.ncf || body?.value || '',
+        ncfCategory:
+          normalizeNcfCategory(body?.ncfCategory || body?.category, ncfCategories) || normalizedCategory,
+      }
+    },
+    [ncfCategories, translate],
+  )
+
+  const updateInvoiceNcf = useCallback(
+    async (invoiceId, ncfValue, ncfCategory) => {
+      const normalizedCategory =
+        normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
+
+      const response = await fetch(`${API_BASE_URL}/Invoices/${invoiceId}/ncf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ncfNumber: ncfValue || null,
+          ncfCategory: normalizedCategory,
+        }),
+      })
+
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        const detail = body?.title || body?.detail || body?.message || translate('pdf.ncfAssignError')
+        throw new Error(detail)
+      }
+
+      return {
+        ncfNumber: body?.ncfNumber || body?.ncf || body?.value || '',
+        ncfCategory:
+          normalizeNcfCategory(body?.ncfCategory || body?.category, ncfCategories) || normalizedCategory,
+      }
+    },
+    [ncfCategories, translate],
+  )
+
+  const undoQuoteConversion = useCallback(
+    async (quoteId) => {
+      const response = await fetch(`${API_BASE_URL}/Quotes/${quoteId}/undo-conversion`, {
+        method: 'POST',
+      })
+
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        const detail = body?.title || body?.detail || body?.message || translate('sections.quotes.undoInvoiceError')
+        throw new Error(detail)
+      }
+    },
+    [translate],
+  )
+
+  const fetchInvoiceNcfData = useCallback(
+    async (invoiceId) => {
+      const response = await fetch(`${API_BASE_URL}/Invoices/${invoiceId}`)
+      const body = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        const detail = body?.title || body?.detail || body?.message || translate('pdf.ncfAssignError')
+        throw new Error(detail)
+      }
+
+      return {
+        ncfNumber: body?.ncfNumber || '',
+        ncfCategory:
+          normalizeNcfCategory(body?.ncfCategory || body?.category, ncfCategories) || null,
+      }
+    },
+    [ncfCategories, translate],
+  )
+
+  const extractNcfSuffix = useCallback(
+    (ncfValue, ncfCategory) => {
+      const normalizedCategory =
+        normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
+      const compact = getCompactNcfToken(ncfValue)
+      if (!compact) {
+        return ''
+      }
+
+      if (compact.startsWith(normalizedCategory)) {
+        return compact.slice(normalizedCategory.length)
+      }
+
+      const inferredCategory = inferNcfCategoryFromNumber(compact, ncfCategories)
+      if (inferredCategory && compact.startsWith(inferredCategory)) {
+        return compact.slice(inferredCategory.length)
+      }
+
+      return compact
+    },
+    [ncfCategories],
+  )
+
+  const buildNcfNumber = useCallback(
+    (ncfCategory, ncfSuffix) => {
+      const normalizedCategory =
+        normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
+      const sequenceLength = getNcfSequenceLength(normalizedCategory, ncfCategories)
+      const sanitizedSuffix = sanitizeNcfSuffix(ncfSuffix).slice(0, sequenceLength)
+      return sanitizedSuffix ? `${normalizedCategory}${sanitizedSuffix}` : ''
+    },
+    [ncfCategories],
+  )
+
   const handleGenerateInvoice = useCallback(
-    async (doc, ncfOverride = null) => {
-      const quotesConfig = sectionConfig.quotes
-      if (!quotesConfig) {
+    async (doc, ncfOverride = null, categoryOverride = null) => {
+      if (!doc?.id) {
         return
       }
 
       try {
         setInvoiceGeneratingId(doc.id)
-        const response = await fetch(
-          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-pdf${
-            ncfOverride ? `?ncfNumber=${encodeURIComponent(ncfOverride)}` : ''
-          }`,
-        )
-
-        if (!response.ok) {
-          throw new Error(translate('pdf.invoiceDownloadError'))
+        if (doc.convertedInvoiceId) {
+          await downloadInvoicePdfById(doc.convertedInvoiceId, doc.number || doc.id)
+        } else {
+          const conversion = await convertQuoteToInvoice(doc.id, ncfOverride, categoryOverride)
+          await downloadInvoicePdfById(conversion.invoiceId, conversion.invoiceNumber || doc.number || doc.id)
         }
 
-        const blob = await response.blob()
-        const downloadUrl = window.URL.createObjectURL(blob)
-        const link = window.document.createElement('a')
-        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
-        link.href = downloadUrl
-        link.download = `Invoice-${safeNumber}.pdf`
-        window.document.body.appendChild(link)
-        link.click()
-        window.document.body.removeChild(link)
-        window.URL.revokeObjectURL(downloadUrl)
         setStatus({
           type: 'success',
           message: translate('pdf.invoiceGenerated'),
         })
-        await loadSection('quotes')
+        await Promise.all([loadSection('quotes'), loadSection('invoices')])
       } catch (error) {
+        const message = error?.message || translate('pdf.invoiceDownloadError')
         setStatus({
           type: 'error',
-          message: error.message || translate('pdf.invoiceDownloadError'),
+          message,
         })
+        throw new Error(message)
       } finally {
         setInvoiceGeneratingId(null)
       }
     },
-    [loadSection, sectionConfig, setStatus, translate],
+    [convertQuoteToInvoice, downloadInvoicePdfById, loadSection, setStatus, translate],
   )
 
-  const handleGenerateInvoiceWord = useCallback(
-    async (doc) => {
-      const quotesConfig = sectionConfig.quotes
-      if (!quotesConfig) {
-        return
-      }
-
-      if (!doc?.ncfNumber) {
-        setStatus({
-          type: 'error',
-          message: translate('pdf.ncfRequired'),
-        })
-        return
-      }
-
-      try {
-        setInvoiceWordGeneratingId(doc.id)
-        const response = await fetch(
-          `${API_BASE_URL}/${quotesConfig.endpoint}/${doc.id}/invoice-word?ncfNumber=${encodeURIComponent(doc.ncfNumber)}`,
-        )
-
-        if (!response.ok) {
-          throw new Error(translate('pdf.invoiceWordDownloadError'))
-        }
-
-        const blob = await response.blob()
-        const downloadUrl = window.URL.createObjectURL(blob)
-        const link = window.document.createElement('a')
-        const safeNumber = doc.number?.replace?.(/\s+/g, '-') ?? doc.id
-        link.href = downloadUrl
-        link.download = `Invoice-${safeNumber}.docx`
-        window.document.body.appendChild(link)
-        link.click()
-        window.document.body.removeChild(link)
-        window.URL.revokeObjectURL(downloadUrl)
-        setStatus({
-          type: 'success',
-          message: translate('pdf.invoiceWordGenerated'),
-        })
-      } catch (error) {
-        setStatus({
-          type: 'error',
-          message: error.message || translate('pdf.invoiceWordDownloadError'),
-        })
-      } finally {
-        setInvoiceWordGeneratingId(null)
-      }
-    },
-    [sectionConfig, translate],
-  )
-
-  const fetchSuggestedNcf = useCallback(async () => {
-    const quotesConfig = sectionConfig.quotes
-    if (!quotesConfig) {
-      throw new Error(translate('pdf.ncfAssignError'))
-    }
-
-    const response = await fetch(`${API_BASE_URL}/${quotesConfig.endpoint}/next-ncf`)
+  const fetchSuggestedNcf = useCallback(async (requestedCategory) => {
+    const normalizedCategory =
+      normalizeNcfCategory(requestedCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
+    const response = await fetch(
+      `${API_BASE_URL}/Invoices/next-ncf?ncfCategory=${encodeURIComponent(normalizedCategory)}`,
+    )
     const body = await response.json().catch(() => null)
 
     if (!response.ok) {
@@ -926,67 +1289,107 @@ function App() {
       throw new Error(detail)
     }
 
-    return body?.ncfNumber || body?.ncf || body?.value || ''
-  }, [sectionConfig, translate])
-
-  const ensureNcfAssignment = useCallback(
-    async (docId, ncfValue) => {
-      const quotesConfig = sectionConfig.quotes
-      if (!quotesConfig) {
-        throw new Error(translate('pdf.ncfAssignError'))
-      }
-
-      const response = await fetch(
-        `${API_BASE_URL}/${quotesConfig.endpoint}/${docId}/ncf`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ncfNumber: ncfValue || null }),
-        },
-      )
-
-      const body = await response.json().catch(() => null)
-      if (!response.ok) {
-        const detail =
-          body?.title || body?.detail || body?.message || translate('pdf.ncfAssignError')
-        throw new Error(detail)
-      }
-
-      return body?.ncfNumber || body?.ncf || body?.value || ''
-    },
-    [sectionConfig, translate],
-  )
+    return {
+      ncfNumber: body?.ncfNumber || body?.ncf || body?.value || '',
+      ncfCategory:
+        normalizeNcfCategory(body?.ncfCategory || body?.category, ncfCategories) || normalizedCategory,
+    }
+  }, [ncfCategories, translate])
 
   const handleOpenNcfDialog = useCallback(
-    async (doc, mode = 'pdf') => {
+    async (doc, mode = 'generate') => {
+      if (!doc?.id) {
+        return
+      }
+
+      const editingNcf = mode === 'edit'
+      const resolvedInvoiceId = editingNcf
+        ? (activeSection === 'invoices' ? doc.id : doc.convertedInvoiceId || null)
+        : null
       const existingValue = doc?.ncfNumber || ''
-      const shouldFetchSuggestion = !existingValue
+      const existingCategory =
+        normalizeNcfCategory(doc?.ncfCategory, ncfCategories) ||
+        inferNcfCategoryFromNumber(existingValue, ncfCategories) ||
+        DEFAULT_NCF_CATEGORY
+      const shouldFetchSuggestion = !editingNcf && !existingValue
 
       setNcfDialog({
         isOpen: true,
-        document: doc,
-        value: existingValue,
-        isLoading: false,
-        error: null,
         mode,
+        document: doc,
+        invoiceId: resolvedInvoiceId,
+        suffix: extractNcfSuffix(existingValue, existingCategory),
+        category: existingCategory,
+        isLoading: editingNcf,
+        error: null,
       })
+
+      if (editingNcf) {
+        if (!resolvedInvoiceId) {
+          setNcfDialog((current) => ({
+            ...current,
+            isLoading: false,
+            error: translate('pdf.ncfEditMissingInvoice'),
+          }))
+          return
+        }
+
+        try {
+          const invoiceNcf = await fetchInvoiceNcfData(resolvedInvoiceId)
+          setNcfDialog((current) => {
+            if (!current.isOpen || current.document?.id !== doc.id || current.mode !== mode) {
+              return current
+            }
+
+            const category =
+              invoiceNcf.ncfCategory ||
+              inferNcfCategoryFromNumber(invoiceNcf.ncfNumber, ncfCategories) ||
+              current.category
+            return {
+              ...current,
+              category,
+              suffix: extractNcfSuffix(invoiceNcf.ncfNumber, category),
+              isLoading: false,
+              error: null,
+            }
+          })
+        } catch (error) {
+          setNcfDialog((current) => {
+            if (!current.isOpen || current.document?.id !== doc.id || current.mode !== mode) {
+              return current
+            }
+
+            return {
+              ...current,
+              isLoading: false,
+              error: error.message || translate('pdf.ncfAssignError'),
+            }
+          })
+        }
+
+        return
+      }
 
       if (!shouldFetchSuggestion) {
         return
       }
 
       try {
-        const suggested = await fetchSuggestedNcf()
+        const suggested = await fetchSuggestedNcf(existingCategory)
         setNcfDialog((current) => {
           if (!current.isOpen || current.document?.id !== doc?.id) {
             return current
           }
 
-          if (current.value.trim()) {
+          if (current.suffix.trim()) {
             return current
           }
 
-          return { ...current, value: suggested }
+          return {
+            ...current,
+            category: suggested.ncfCategory,
+            suffix: extractNcfSuffix(suggested.ncfNumber, suggested.ncfCategory),
+          }
         })
       } catch (error) {
         setNcfDialog((current) => {
@@ -1001,17 +1404,19 @@ function App() {
         })
       }
     },
-    [fetchSuggestedNcf, translate],
+    [activeSection, extractNcfSuffix, fetchInvoiceNcfData, fetchSuggestedNcf, ncfCategories, translate],
   )
 
   const handleCancelNcfDialog = useCallback(() => {
     setNcfDialog({
       isOpen: false,
+      mode: 'generate',
       document: null,
-      value: '',
+      invoiceId: null,
+      suffix: '',
+      category: DEFAULT_NCF_CATEGORY,
       isLoading: false,
       error: null,
-      mode: 'pdf',
     })
   }, [])
 
@@ -1020,40 +1425,97 @@ function App() {
       return
     }
 
+    const normalizedCategory =
+      normalizeNcfCategory(ncfDialog.category, ncfCategories) || DEFAULT_NCF_CATEGORY
+    const ncfNumber = buildNcfNumber(normalizedCategory, ncfDialog.suffix)
+    if (!ncfNumber) {
+      setNcfDialog((current) => ({
+        ...current,
+        error: translate('pdf.ncfRequired'),
+      }))
+      return
+    }
+
     try {
       setNcfDialog((current) => ({ ...current, isLoading: true, error: null }))
-      const assigned = await ensureNcfAssignment(ncfDialog.document.id, ncfDialog.value)
-      if (ncfDialog.mode === 'word') {
-        await handleGenerateInvoiceWord({ ...ncfDialog.document, ncfNumber: assigned }, assigned)
+      if (ncfDialog.mode === 'edit') {
+        if (!ncfDialog.invoiceId) {
+          throw new Error(translate('pdf.ncfEditMissingInvoice'))
+        }
+
+        setUpdatingNcfId(ncfDialog.document.id)
+        await updateInvoiceNcf(ncfDialog.invoiceId, ncfNumber, normalizedCategory)
+        setStatus({
+          type: 'success',
+          message: translate('pdf.ncfUpdated'),
+        })
       } else {
-        await handleGenerateInvoice({ ...ncfDialog.document, ncfNumber: assigned }, assigned)
+        await handleGenerateInvoice(
+          ncfDialog.document,
+          ncfNumber,
+          normalizedCategory,
+        )
       }
+
       setNcfDialog({
         isOpen: false,
+        mode: 'generate',
         document: null,
-        value: '',
+        invoiceId: null,
+        suffix: '',
+        category: DEFAULT_NCF_CATEGORY,
         isLoading: false,
         error: null,
-        mode: 'pdf',
       })
-      await loadSection('quotes')
+      await Promise.all([loadSection('quotes'), loadSection('invoices')])
     } catch (error) {
       setNcfDialog((current) => ({
         ...current,
         isLoading: false,
         error: error.message || translate('pdf.ncfAssignError'),
       }))
+    } finally {
+      setUpdatingNcfId(null)
     }
   }, [
-    ensureNcfAssignment,
+    buildNcfNumber,
     handleGenerateInvoice,
-    handleGenerateInvoiceWord,
     loadSection,
+    ncfCategories,
+    ncfDialog.category,
     ncfDialog.document,
+    ncfDialog.invoiceId,
     ncfDialog.mode,
-    ncfDialog.value,
+    ncfDialog.suffix,
     translate,
+    updateInvoiceNcf,
   ])
+
+  const handleUndoConvertedInvoice = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setUndoingQuoteId(doc.id)
+        await undoQuoteConversion(doc.id)
+        setStatus({
+          type: 'success',
+          message: translate('sections.quotes.undoInvoiceSuccess'),
+        })
+        await Promise.all([loadSection('quotes'), loadSection('invoices')])
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('sections.quotes.undoInvoiceError'),
+        })
+      } finally {
+        setUndoingQuoteId(null)
+      }
+    },
+    [loadSection, translate, undoQuoteConversion],
+  )
 
   const documentExtraActions = useMemo(() => {
     const previewAction = {
@@ -1075,22 +1537,60 @@ function App() {
         },
         previewAction,
         {
+          label: translate('documentList.duplicateQuote'),
+          loadingLabel: translate('documentList.duplicatingQuote'),
+          busyId: duplicatingQuoteId,
+          onClick: handleDuplicateQuote,
+          variant: 'button--ghost',
+        },
+        {
           label: (doc) =>
-            doc?.invoiceGeneratedAt || doc?.ncfNumber
+            doc?.convertedInvoiceId || doc?.convertedAt || doc?.invoiceGeneratedAt || doc?.ncfNumber
               ? translate('documentList.downloadInvoice')
               : translate('documentList.generateInvoice'),
           loadingLabel: translate('documentList.generatingInvoice'),
           busyId: invoiceGeneratingId,
-          onClick: (doc) => handleOpenNcfDialog(doc, 'pdf'),
+          onClick: (doc) => {
+            if (doc?.convertedInvoiceId || doc?.convertedAt) {
+              void handleGenerateInvoice(doc).catch(() => {})
+              return
+            }
+
+            void handleOpenNcfDialog(doc, 'generate')
+          },
+          variant: 'button--ghost',
         },
         {
-          label: (doc) =>
-            doc?.invoiceGeneratedAt || doc?.ncfNumber
-              ? translate('documentList.downloadInvoiceWord')
-              : translate('documentList.downloadInvoiceWord'),
-          loadingLabel: translate('documentList.generatingInvoiceWord'),
-          busyId: invoiceWordGeneratingId,
-          onClick: (doc) => handleOpenNcfDialog(doc, 'word'),
+          label: translate('documentList.editNcf'),
+          loadingLabel: translate('documentList.editingNcf'),
+          busyId: updatingNcfId,
+          isVisible: (doc) => Boolean(doc?.convertedInvoiceId || doc?.convertedAt),
+          onClick: (doc) => {
+            void handleOpenNcfDialog(doc, 'edit')
+          },
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('documentList.undoInvoice'),
+          loadingLabel: translate('documentList.undoingInvoice'),
+          busyId: undoingQuoteId,
+          isVisible: (doc) => Boolean(doc?.convertedInvoiceId || doc?.convertedAt),
+          onClick: handleUndoConvertedInvoice,
+          variant: 'button--ghost',
+        },
+      ]
+    }
+
+    if (isInvoicesSection) {
+      return [
+        previewAction,
+        {
+          label: translate('documentList.editNcf'),
+          loadingLabel: translate('documentList.editingNcf'),
+          busyId: updatingNcfId,
+          onClick: (doc) => {
+            void handleOpenNcfDialog(doc, 'edit')
+          },
           variant: 'button--ghost',
         },
       ]
@@ -1098,15 +1598,21 @@ function App() {
 
     return [previewAction]
   }, [
+    duplicatingQuoteId,
     editingQuote?.id,
+    handleDuplicateQuote,
     handleEditQuote,
+    handleGenerateInvoice,
     handleOpenNcfDialog,
     handlePreviewDocument,
+    handleUndoConvertedInvoice,
     invoiceGeneratingId,
-    invoiceWordGeneratingId,
+    isInvoicesSection,
     isQuotesSection,
     previewingId,
     translate,
+    undoingQuoteId,
+    updatingNcfId,
   ])
 
   const handleSort = useCallback((columnKey) => {
@@ -1117,50 +1623,54 @@ function App() {
     })
   }, [])
 
+  const ncfDialogSequenceLength = getNcfSequenceLength(ncfDialog.category, ncfCategories)
+  const ncfDialogSuffixPlaceholder = '0'.repeat(ncfDialogSequenceLength)
+  const isNcfEditMode = ncfDialog.mode === 'edit'
+
   return (
     <div className="layout">
-      <header className="page-header">
-        <img
-          src={PapavelagLogo}
-          alt="Papavelag Technologies logo"
-          className="page-header__logo"
-        />
-        <h1>{translate('app.title')}</h1>
-        <p className="page-header__subtitle">{translate('app.subtitle')}</p>
+      <header className="top-nav">
+        <div className="top-nav__brand">
+          <img
+            src={PapavelagLogo}
+            alt="Papavelag Technologies logo"
+            className="top-nav__logo"
+          />
+          <span className="top-nav__title">{translate('app.title')}</span>
+        </div>
+        <div className="top-nav__controls">
+          <label className="toolbar__control">
+            {translate('controls.language')}
+            <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+              {LANGUAGES.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="toolbar__control">
+            {translate('controls.currency')}
+            <select
+              value={defaultCurrency}
+              onChange={(event) => setDefaultCurrency(event.target.value)}
+            >
+              {CURRENCY_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {translate(`currencies.${code}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="toolbar__control">
+            {translate('controls.theme')}
+            <select value={theme} onChange={(event) => setTheme(event.target.value)}>
+              <option value="light">{translate('controls.themeLight')}</option>
+              <option value="dark">{translate('controls.themeDark')}</option>
+            </select>
+          </label>
+        </div>
       </header>
-
-      <div className="toolbar">
-        <label className="toolbar__control">
-          {translate('controls.language')}
-          <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {LANGUAGES.map((entry) => (
-              <option key={entry.value} value={entry.value}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="toolbar__control">
-          {translate('controls.currency')}
-          <select
-            value={defaultCurrency}
-            onChange={(event) => setDefaultCurrency(event.target.value)}
-          >
-            {CURRENCY_CODES.map((code) => (
-              <option key={code} value={code}>
-                {translate(`currencies.${code}`)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="toolbar__control">
-          {translate('controls.theme')}
-          <select value={theme} onChange={(event) => setTheme(event.target.value)}>
-            <option value="light">{translate('controls.themeLight')}</option>
-            <option value="dark">{translate('controls.themeDark')}</option>
-          </select>
-        </label>
-      </div>
 
       <nav className="section-tabs" aria-label="Financial document sections">
         {Object.entries(sectionConfig).map(([key, value]) => (
@@ -1176,16 +1686,38 @@ function App() {
       </nav>
 
       <section className="section-content">
-        <div className="section-intro">
-          <h2>{config.title}</h2>
-          <p>{config.description}</p>
+        <div className={`section-intro ${isQuotesSection ? 'section-intro--with-action' : ''}`}>
+          <div className="section-intro__copy">
+            <h2>{config.title}</h2>
+            <p>{config.description}</p>
+          </div>
+          {isQuotesSection ? (
+            <button
+              type="button"
+              className="button button--compact button--icon-text"
+              onClick={isEditingQuote ? handleResumeEdit : handleOpenQuoteModal}
+            >
+              <UiIcon className="ui-icon ui-icon--button">
+                <path d="M10 4v12" />
+                <path d="M4 10h12" />
+              </UiIcon>
+              {isEditingQuote
+                ? translate('invoiceForm.resumeEdit')
+                : translate('invoiceForm.openModal')}
+            </button>
+          ) : null}
         </div>
-        <BrandPanel note={brandNote} variant="compact" />
 
         <div className="filter-bar" role="search">
           <div className="filter-bar__grid">
             <label>
-              {translate('filters.searchLabel')}
+              <span className="field-label">
+                <UiIcon>
+                  <circle cx="8.5" cy="8.5" r="4.5" />
+                  <path d="M12 12l4 4" />
+                </UiIcon>
+                <span>{translate('filters.searchLabel')}</span>
+              </span>
               <input
                 type="search"
                 value={filters.search}
@@ -1196,7 +1728,13 @@ function App() {
               />
             </label>
             <label>
-              {config.partyLabel}
+              <span className="field-label">
+                <UiIcon>
+                  <path d="M14.5 16.5a4.5 4.5 0 0 0-9 0" />
+                  <circle cx="10" cy="7" r="3" />
+                </UiIcon>
+                <span>{config.partyLabel}</span>
+              </span>
               <input
                 type="text"
                 value={filters.client}
@@ -1207,9 +1745,19 @@ function App() {
               />
             </label>
             <label>
-              {activeSection === 'quotes'
-                ? translate('filters.numberLabel')
-                : translate('filters.genericNumberLabel')}
+              <span className="field-label">
+                <UiIcon>
+                  <path d="M6 4L4 16" />
+                  <path d="M12 4l-2 12" />
+                  <path d="M3 8h12" />
+                  <path d="M2 12h12" />
+                </UiIcon>
+                <span>
+                  {activeSection === 'quotes'
+                    ? translate('filters.numberLabel')
+                    : translate('filters.genericNumberLabel')}
+                </span>
+              </span>
               <input
                 type="text"
                 value={filters.number}
@@ -1219,7 +1767,15 @@ function App() {
               />
             </label>
             <label>
-              {translate('filters.dateLabel')}
+              <span className="field-label">
+                <UiIcon>
+                  <rect x="3" y="4.5" width="14" height="12" rx="2" />
+                  <path d="M6.5 3v3" />
+                  <path d="M13.5 3v3" />
+                  <path d="M3 8.5h14" />
+                </UiIcon>
+                <span>{translate('filters.dateLabel')}</span>
+              </span>
               <input
                 type="date"
                 value={filters.date}
@@ -1229,7 +1785,13 @@ function App() {
               />
             </label>
             <label>
-              {translate('filters.ncfLabel')}
+              <span className="field-label">
+                <UiIcon>
+                  <path d="M6 4.5h6.8a1.2 1.2 0 0 1 .85.35l1.95 1.95a1.2 1.2 0 0 1 .35.85v4.7a1.2 1.2 0 0 1-1.2 1.2H6a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2z" />
+                  <circle cx="12.8" cy="7.3" r="0.7" />
+                </UiIcon>
+                <span>{translate('filters.ncfLabel')}</span>
+              </span>
               <input
                 type="text"
                 value={filters.ncf}
@@ -1242,9 +1804,13 @@ function App() {
           </div>
           <button
             type="button"
-            className="button button--secondary"
+            className="button button--secondary button--compact button--icon-text"
             onClick={() => setFilters({ search: '', client: '', number: '', date: '', ncf: '' })}
           >
+            <UiIcon className="ui-icon ui-icon--button">
+              <path d="M16 5v4h-4" />
+              <path d="M4.8 8.2a6 6 0 1 1 .3 5.8" />
+            </UiIcon>
             {translate('filters.clear')}
           </button>
         </div>
@@ -1280,57 +1846,38 @@ function App() {
         )}
       </section>
 
-      <section className="section-content">
-        <div className="section-intro">
-          <h2>{formHeading}</h2>
-          <p>{formDescription}</p>
-        </div>
-        <BrandPanel note={brandNote} />
+      {!isQuotesSection ? (
+        <section className="section-content">
+          <div className="section-intro">
+            <h2>{formHeading}</h2>
+            <p>{formDescription}</p>
+          </div>
+          <BrandPanel note={brandNote} />
 
-        {isQuotesSection ? (
-          <div className="quote-cta">
-            <div className="quote-cta__copy">
-              <p>{translate('invoiceForm.modalCtaDescription')}</p>
-              {isEditingQuote ? (
-                <div className="form-hint form-hint--warning">
-                  {translate('invoiceForm.editingLabel')}{' '}
-                  <span className="form-hint__strong">
-                    {editingQuote?.number || translate('sections.quotes.singular')}
-                  </span>
-                </div>
-              ) : (
-                <div className="form-hint">{translate('invoiceForm.modalCtaTitle')}</div>
-              )}
-            </div>
-            <div className="quote-cta__actions">
-              <button
-                type="button"
-                className="button"
-                onClick={isEditingQuote ? handleResumeEdit : handleOpenQuoteModal}
-              >
-                {isEditingQuote
-                  ? translate('invoiceForm.resumeEdit')
-                  : translate('invoiceForm.openModal')}
-              </button>
-              {isEditingQuote ? (
+          {isReceiptsSection ? (
+            <ReceiptForm
+              onSubmit={(payload) => handleCreate('receipts', payload)}
+              isSubmitting={isSubmitting}
+              t={translate}
+            />
+          ) : (
+            <div className="quote-cta">
+              <div className="quote-cta__copy">
+                <p>{translate('sections.invoices.panelHint')}</p>
+              </div>
+              <div className="quote-cta__actions">
                 <button
                   type="button"
-                  className="button button--ghost"
-                  onClick={handleCancelEdit}
+                  className="button"
+                  onClick={() => setActiveSection('quotes')}
                 >
-                  {translate('invoiceForm.clearEdit')}
+                  {translate('sections.invoices.openQuotes')}
                 </button>
-              ) : null}
+              </div>
             </div>
-          </div>
-        ) : (
-          <ReceiptForm
-            onSubmit={(payload) => handleCreate('receipts', payload)}
-            isSubmitting={isSubmitting}
-            t={translate}
-          />
-        )}
-      </section>
+          )}
+        </section>
+      ) : null}
 
       {isQuotesSection ? (
         <Modal
@@ -1349,6 +1896,7 @@ function App() {
             initialInvoice={editingQuote}
             mode={isEditingQuote ? 'edit' : 'create'}
             onCancelEdit={isEditingQuote ? handleCancelEdit : undefined}
+            customers={customers}
           />
         </Modal>
       ) : null}
@@ -1356,8 +1904,8 @@ function App() {
         <Modal
           isOpen={ncfDialog.isOpen}
           onClose={ncfDialog.isLoading ? undefined : handleCancelNcfDialog}
-          title={translate('pdf.ncfDialogTitle')}
-          description={translate('pdf.ncfDialogDescription')}
+          title={translate(isNcfEditMode ? 'pdf.ncfEditDialogTitle' : 'pdf.ncfDialogTitle')}
+          description={translate(isNcfEditMode ? 'pdf.ncfEditDialogDescription' : 'pdf.ncfDialogDescription')}
           eyebrow={config.title}
         >
           <div className="modal-body">
@@ -1367,18 +1915,54 @@ function App() {
               </div>
             ) : null}
             <label className="modal-input">
-              {translate('documentList.ncfLabel')}
-              <input
-                type="text"
-                value={ncfDialog.value}
+              {translate('invoiceForm.ncfCategoryLabel')}
+              <select
+                value={ncfDialog.category}
                 onChange={(event) =>
-                  setNcfDialog((current) => ({ ...current, value: event.target.value }))
+                  setNcfDialog((current) => {
+                    const nextCategory =
+                      normalizeNcfCategory(event.target.value, ncfCategories) || DEFAULT_NCF_CATEGORY
+                    const nextSequenceLength = getNcfSequenceLength(nextCategory, ncfCategories)
+                    return {
+                      ...current,
+                      category: nextCategory,
+                      suffix: current.suffix.slice(0, nextSequenceLength),
+                    }
+                  })
                 }
-                placeholder={translate('invoiceForm.ncfPlaceholder')}
                 disabled={ncfDialog.isLoading}
-              />
+              >
+                {ncfCategories.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.code} - {(option.name || '').trim() || translate(`ncfCategories.${option.code}`)}
+                  </option>
+                ))}
+              </select>
             </label>
-            <p className="input-hint">{translate('invoiceForm.ncfHint')}</p>
+            <p className="input-hint">{translate('invoiceForm.ncfCategoryHint')}</p>
+            <label className="modal-input">
+              {translate('documentList.ncfLabel')}
+              <div className="ncf-input-group">
+                <span className="ncf-input-group__prefix">{ncfDialog.category}</span>
+                <input
+                  type="text"
+                  value={ncfDialog.suffix}
+                  onChange={(event) =>
+                    setNcfDialog((current) => ({
+                      ...current,
+                      suffix: sanitizeNcfSuffix(event.target.value).slice(
+                        0,
+                        getNcfSequenceLength(current.category, ncfCategories),
+                      ),
+                    }))
+                  }
+                  placeholder={ncfDialogSuffixPlaceholder}
+                  maxLength={ncfDialogSequenceLength}
+                  disabled={ncfDialog.isLoading}
+                />
+              </div>
+            </label>
+            <p className="input-hint">{translate('invoiceForm.ncfSuffixHint')}</p>
             <div className="form-actions">
               <button
                 type="button"
@@ -1392,13 +1976,11 @@ function App() {
                 type="button"
                 className="button"
                 onClick={handleConfirmNcfDialog}
-                disabled={ncfDialog.isLoading || !ncfDialog.value.trim()}
+                disabled={ncfDialog.isLoading || !ncfDialog.suffix.trim()}
               >
                 {ncfDialog.isLoading
-                  ? ncfDialog.mode === 'word'
-                    ? translate('documentList.generatingInvoiceWord')
-                    : translate('documentList.generatingInvoice')
-                  : translate('pdf.ncfDialogConfirm')}
+                  ? translate(isNcfEditMode ? 'documentList.editingNcf' : 'documentList.generatingInvoice')
+                  : translate(isNcfEditMode ? 'pdf.ncfDialogConfirmEdit' : 'pdf.ncfDialogConfirm')}
               </button>
             </div>
           </div>

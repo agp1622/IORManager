@@ -4,6 +4,7 @@ using IORManager.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace IORManager.Migrations
 {
     [DbContext(typeof(IORManagerContext))]
-    partial class IORManagerContextModelSnapshot : ModelSnapshot
+    [Migration("20260210225848_AddNcfCategoriesAndPerCategorySequences")]
+    partial class AddNcfCategoriesAndPerCategorySequences
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,41 +24,6 @@ namespace IORManager.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-
-            modelBuilder.Entity("IORManager.Models.Customer", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Address")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<string>("Contact")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("Customers");
-                });
 
             modelBuilder.Entity("IORManager.Models.DocumentLine", b =>
                 {
@@ -78,9 +46,6 @@ namespace IORManager.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
 
-                    b.Property<Guid?>("QuoteId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("UnitOfMeasure")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -94,8 +59,6 @@ namespace IORManager.Migrations
                     b.HasIndex("InvoiceId");
 
                     b.HasIndex("PurchaseOrderId");
-
-                    b.HasIndex("QuoteId");
 
                     b.ToTable("DocumentLines");
                 });
@@ -229,17 +192,12 @@ namespace IORManager.Migrations
                     b.HasBaseType("IORManager.Models.FinancialDocument");
 
                     b.Property<string>("CustomerAddress")
-                        .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("CustomerContact")
-                        .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
-
-                    b.Property<Guid?>("CustomerId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ExpirationDateOverride")
                         .HasColumnType("datetime2");
@@ -258,18 +216,9 @@ namespace IORManager.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
-                    b.Property<Guid?>("QuoteId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasIndex("CustomerId");
-
                     b.HasIndex("NcfNumber")
                         .IsUnique()
                         .HasFilter("[NcfNumber] IS NOT NULL");
-
-                    b.HasIndex("QuoteId")
-                        .IsUnique()
-                        .HasFilter("[QuoteId] IS NOT NULL");
 
                     b.HasDiscriminator().HasValue("Invoice");
                 });
@@ -279,56 +228,6 @@ namespace IORManager.Migrations
                     b.HasBaseType("IORManager.Models.FinancialDocument");
 
                     b.HasDiscriminator().HasValue("PurchaseOrder");
-                });
-
-            modelBuilder.Entity("IORManager.Models.Quote", b =>
-                {
-                    b.HasBaseType("IORManager.Models.FinancialDocument");
-
-                    b.Property<DateTime?>("ConvertedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("ConvertedInvoiceId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CustomerAddress")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<string>("CustomerContact")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
-                    b.Property<Guid?>("CustomerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("ItbisRate")
-                        .HasColumnType("decimal(5,4)");
-
-                    b.HasIndex("ConvertedInvoiceId")
-                        .IsUnique()
-                        .HasFilter("[ConvertedInvoiceId] IS NOT NULL");
-
-                    b.HasIndex("CustomerId");
-
-                    b.ToTable("FinancialDocument", t =>
-                        {
-                            t.Property("CustomerAddress")
-                                .HasColumnName("Quote_CustomerAddress");
-
-                            t.Property("CustomerContact")
-                                .HasColumnName("Quote_CustomerContact");
-
-                            t.Property("CustomerId")
-                                .HasColumnName("Quote_CustomerId");
-
-                            t.Property("ItbisRate")
-                                .HasColumnName("Quote_ItbisRate");
-                        });
-
-                    b.HasDiscriminator().HasValue("Quote");
                 });
 
             modelBuilder.Entity("IORManager.Models.Receipt", b =>
@@ -353,16 +252,9 @@ namespace IORManager.Migrations
                         .HasForeignKey("PurchaseOrderId")
                         .OnDelete(DeleteBehavior.NoAction);
 
-                    b.HasOne("IORManager.Models.Quote", "Quote")
-                        .WithMany("Lines")
-                        .HasForeignKey("QuoteId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
                     b.Navigation("Invoice");
 
                     b.Navigation("PurchaseOrder");
-
-                    b.Navigation("Quote");
                 });
 
             modelBuilder.Entity("IORManager.Models.ReceiptPayment", b =>
@@ -378,40 +270,10 @@ namespace IORManager.Migrations
 
             modelBuilder.Entity("IORManager.Models.Invoice", b =>
                 {
-                    b.HasOne("IORManager.Models.Customer", "Customer")
-                        .WithMany("Invoices")
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("Customer");
-                });
-
-            modelBuilder.Entity("IORManager.Models.Quote", b =>
-                {
-                    b.HasOne("IORManager.Models.Customer", "Customer")
-                        .WithMany()
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("Customer");
-                });
-
-            modelBuilder.Entity("IORManager.Models.Customer", b =>
-                {
-                    b.Navigation("Invoices");
-                });
-
-            modelBuilder.Entity("IORManager.Models.Invoice", b =>
-                {
                     b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("IORManager.Models.PurchaseOrder", b =>
-                {
-                    b.Navigation("Lines");
-                });
-
-            modelBuilder.Entity("IORManager.Models.Quote", b =>
                 {
                     b.Navigation("Lines");
                 });

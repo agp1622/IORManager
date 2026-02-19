@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 
 const createEmptyLine = (unitOfMeasure = 'unit') => ({
   description: '',
@@ -39,19 +39,32 @@ const InvoiceForm = ({
   initialInvoice = null,
   mode = 'create',
   onCancelEdit,
+  customers = [],
 }) => {
   const today = new Date().toISOString().split('T')[0]
   const formInstanceId = useId()
   const [invoiceDate, setInvoiceDate] = useState(today)
-  const [expirationDate, setExpirationDate] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerAddress, setCustomerAddress] = useState('')
   const [customerContact, setCustomerContact] = useState('')
   const [currencyCode, setCurrencyCode] = useState(defaultCurrency)
   const [itbisRate, setItbisRate] = useState('')
-  const [ncfNumber, setNcfNumber] = useState('')
   const [lines, setLines] = useState([createEmptyLine()])
   const isEditMode = mode === 'edit' && initialInvoice
+  const customerListId = `${formInstanceId}-customers`
+
+  const savedCustomers = useMemo(
+    () =>
+      (Array.isArray(customers) ? customers : [])
+        .map((customer) => ({
+          name: (customer?.name || '').trim(),
+          normalizedName: (customer?.name || '').trim().toLowerCase(),
+          address: (customer?.address || '').trim(),
+          contact: (customer?.contact || '').trim(),
+        }))
+        .filter((customer) => customer.name.length > 0),
+    [customers],
+  )
 
   const normalizeDateOnly = (value, fallback) => {
     if (!value) {
@@ -70,39 +83,10 @@ const InvoiceForm = ({
     return parsed.toISOString().split('T')[0]
   }
 
-  const computeAutoExpiration = (dateValue, generatedAtValue) => {
-    const baseValue = generatedAtValue || dateValue
-    if (!baseValue) {
-      return ''
-    }
-
-    const normalized = normalizeDateOnly(baseValue, null)
-    if (!normalized) {
-      return ''
-    }
-
-    const baseDate = new Date(`${normalized}T00:00:00Z`)
-    if (Number.isNaN(baseDate.getTime())) {
-      return ''
-    }
-
-    const next = new Date(baseDate)
-    next.setUTCFullYear(next.getUTCFullYear() + 1)
-    return next.toISOString().split('T')[0]
-  }
-
-  const autoExpirationDate = computeAutoExpiration(
-    invoiceDate,
-    isEditMode ? initialInvoice?.invoiceGeneratedAt : null,
-  )
-
   useEffect(() => {
     if (initialInvoice) {
       const normalizedDate = normalizeDateOnly(initialInvoice.date, today)
       setInvoiceDate(normalizedDate)
-      setExpirationDate(
-        normalizeDateOnly(initialInvoice.expirationDateOverride, ''),
-      )
       setCustomerName(initialInvoice.customerName || initialInvoice.partyName || '')
       setCustomerAddress(initialInvoice.customerAddress || '')
       setCustomerContact(initialInvoice.customerContact || '')
@@ -112,7 +96,6 @@ const InvoiceForm = ({
           ? (Number(initialInvoice.itbisRate) * 100).toString()
           : '',
       )
-      setNcfNumber(initialInvoice.ncfNumber || '')
       const nextLines = Array.isArray(initialInvoice.lines) && initialInvoice.lines.length > 0
         ? initialInvoice.lines.map((line) => ({
             description: line.description ?? '',
@@ -129,13 +112,11 @@ const InvoiceForm = ({
     }
 
     setInvoiceDate(today)
-    setExpirationDate('')
     setCustomerName('')
     setCustomerAddress('')
     setCustomerContact('')
     setCurrencyCode(defaultCurrency)
     setItbisRate('')
-    setNcfNumber('')
     setLines([createEmptyLine()])
   }, [initialInvoice, defaultCurrency, today])
 
@@ -162,6 +143,23 @@ const InvoiceForm = ({
     )
   }
 
+  const applySavedCustomer = (rawName) => {
+    const normalizedName = rawName.trim().toLowerCase()
+    if (!normalizedName) {
+      return
+    }
+
+    const matchedCustomer = savedCustomers.find(
+      (customer) => customer.normalizedName === normalizedName,
+    )
+    if (!matchedCustomer) {
+      return
+    }
+
+    setCustomerAddress(matchedCustomer.address)
+    setCustomerContact(matchedCustomer.contact)
+  }
+
   const handleSubmit = async (event) => {
     event.preventDefault()
 
@@ -179,14 +177,12 @@ const InvoiceForm = ({
 
     const payload = {
       invoiceDate,
-      expirationDate: expirationDate || null,
-      customerName,
-      customerAddress: normalizedAddress || null,
-      customerContact: normalizedContact || null,
+      customerName: customerName.trim(),
+      customerAddress: normalizedAddress,
+      customerContact: normalizedContact,
       currencyCode,
       locale: initialInvoice?.cultureName || locale,
       itbisRate: normalizedItbisRate,
-      ncfNumber: ncfNumber.trim() || null,
       lines: lines.map((line) => ({
         description: line.description,
         quantity: Number(line.quantity) || 0,
@@ -199,7 +195,6 @@ const InvoiceForm = ({
 
     if (wasSuccessful && !isEditMode) {
       setInvoiceDate(today)
-      setExpirationDate('')
       setCustomerName('')
       setCustomerAddress('')
       setCustomerContact('')
@@ -223,33 +218,31 @@ const InvoiceForm = ({
           <input
             type="date"
             value={invoiceDate}
-            onChange={(event) => setInvoiceDate(event.target.value)}
-            required
+            disabled
+            readOnly
           />
-        </label>
-        <label>
-          {t('invoiceForm.expirationDateLabel')}
-          <input
-            type="date"
-            value={expirationDate}
-            onChange={(event) => setExpirationDate(event.target.value)}
-          />
-          <p className="input-hint">
-            {t('invoiceForm.expirationDateHint')}
-            {autoExpirationDate
-              ? ` (${t('invoiceForm.expirationDateAuto')} ${autoExpirationDate})`
-              : ''}
-          </p>
+          <p className="input-hint">{t('invoiceForm.quoteDateFixedHint')}</p>
         </label>
         <label>
           {t('invoiceForm.customerNameLabel')}
           <input
             type="text"
             value={customerName}
-            onChange={(event) => setCustomerName(event.target.value)}
+            list={customerListId}
+            onChange={(event) => {
+              const nextValue = event.target.value
+              setCustomerName(nextValue)
+              applySavedCustomer(nextValue)
+            }}
             required
             placeholder={t('invoiceForm.customerNamePlaceholder')}
           />
+          <datalist id={customerListId}>
+            {savedCustomers.map((customer) => (
+              <option key={customer.name} value={customer.name} />
+            ))}
+          </datalist>
+          <p className="input-hint">{t('invoiceForm.customerSavedHint')}</p>
         </label>
         <label>
           {t('invoiceForm.customerAddressLabel')}
@@ -258,6 +251,7 @@ const InvoiceForm = ({
             onChange={(event) => setCustomerAddress(event.target.value)}
             placeholder={t('invoiceForm.customerAddressPlaceholder')}
             rows="2"
+            required
           />
         </label>
         <label>
@@ -267,6 +261,7 @@ const InvoiceForm = ({
             value={customerContact}
             onChange={(event) => setCustomerContact(event.target.value)}
             placeholder={t('invoiceForm.customerContactPlaceholder')}
+            required
           />
         </label>
         <label>
@@ -296,16 +291,6 @@ const InvoiceForm = ({
           />
           <p className="input-hint">{t('invoiceForm.itbisHint')}</p>
         </label>
-        <label>
-          {t('invoiceForm.ncfLabel')}
-          <input
-            type="text"
-            value={ncfNumber}
-            onChange={(event) => setNcfNumber(event.target.value)}
-            placeholder={t('invoiceForm.ncfPlaceholder')}
-          />
-          <p className="input-hint">{t('invoiceForm.ncfHint')}</p>
-        </label>
       </div>
 
       <div className="form-section">
@@ -313,10 +298,13 @@ const InvoiceForm = ({
           <h4>{t('invoiceForm.lineItemsHeading')}</h4>
           <button
             type="button"
-            className="button button--secondary"
+            className="button button--icon button--icon-add-line"
             onClick={addLine}
+            aria-label={t('invoiceForm.addLine')}
+            title={t('invoiceForm.addLine')}
           >
-            {t('invoiceForm.addLine')}
+            <span aria-hidden="true">+</span>
+            <span className="sr-only">{t('invoiceForm.addLine')}</span>
           </button>
         </div>
         <div className="line-table-wrapper">

@@ -1,6 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IORManager", "IORManager.csproj", "{B5C6E63A-E07A-49F0-80E7-3C3F46C46FD8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{784B6195-C0E4-43CA-A97C-9561DBD686E7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IORManager.Tests", "tests\IORManager.Tests\IORManager.Tests.csproj", "{D69FC2B9-0B20-4F6E-9048-39EBD8FC8CB3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -12,5 +17,12 @@ Global
 		{B5C6E63A-E07A-49F0-80E7-3C3F46C46FD8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B5C6E63A-E07A-49F0-80E7-3C3F46C46FD8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B5C6E63A-E07A-49F0-80E7-3C3F46C46FD8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D69FC2B9-0B20-4F6E-9048-39EBD8FC8CB3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D69FC2B9-0B20-4F6E-9048-39EBD8FC8CB3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D69FC2B9-0B20-4F6E-9048-39EBD8FC8CB3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D69FC2B9-0B20-4F6E-9048-39EBD8FC8CB3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{D69FC2B9-0B20-4F6E-9048-39EBD8FC8CB3} = {784B6195-C0E4-43CA-A97C-9561DBD686E7}
 	EndGlobalSection
 EndGlobal

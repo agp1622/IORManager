@@ -35,18 +35,51 @@ public class InvoicesController : ControllerBase
 
     [HttpGet]
     public ActionResult<IReadOnlyCollection<Invoice>> GetInvoices()
-        => Ok(_repository.GetAll());
+    {
+        var invoices = _repository.GetAll().ToList();
+        PopulateQuoteNumbers(invoices);
+        return Ok(invoices);
+    }
 
     [HttpGet("{id:guid}")]
     public ActionResult<Invoice> GetInvoice(Guid id)
     {
         var invoice = _repository.GetById(id);
-        return invoice is not null ? Ok(invoice) : NotFound();
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        PopulateQuoteNumbers([invoice]);
+        return Ok(invoice);
+    }
+
+    [HttpGet("ncf-categories")]
+    public ActionResult<IReadOnlyCollection<NcfCategoryResponse>> GetNcfCategories()
+    {
+        var categories = NcfCategoryCatalog.GetAll()
+            .Select(definition => new NcfCategoryResponse(
+                definition.Code,
+                definition.Name,
+                definition.SequenceLength,
+                definition.IsElectronic))
+            .ToArray();
+
+        return Ok(categories);
     }
 
     [HttpGet("next-ncf")]
-    public ActionResult<NcfAssignmentResponse> GetNextNcf()
-        => Ok(new NcfAssignmentResponse(_ncfNumberGenerator.PeekNextNumber()));
+    public ActionResult<NcfAssignmentResponse> GetNextNcf([FromQuery] string? ncfCategory)
+    {
+        if (!TryNormalizeCategoryCode(ncfCategory, out var normalizedCategory, out var categoryError))
+        {
+            return categoryError!;
+        }
+
+        normalizedCategory ??= NcfCategoryCatalog.DefaultCategoryCode;
+        var nextNumber = _ncfNumberGenerator.PeekNextNumber(normalizedCategory);
+        return Ok(new NcfAssignmentResponse(nextNumber, normalizedCategory));
+    }
 
     [HttpPost]
     public ActionResult<InvoiceCreateResponse> CreateInvoice([FromBody] InvoiceCreateRequest request)
@@ -56,18 +89,26 @@ public class InvoicesController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var invoice = request.ToInvoice();
-        invoice.NcfNumber = NormalizeNcfNumber(invoice.NcfNumber);
-        if (!string.IsNullOrWhiteSpace(invoice.NcfNumber) &&
-            IsDuplicateNcf(invoice.NcfNumber, invoice.Id))
+        if (!TryResolveCustomerRecord(
+                request.CustomerName,
+                request.CustomerAddress,
+                request.CustomerContact,
+                out var customer,
+                out var customerError))
         {
-            return DuplicateNcfConflict(invoice.NcfNumber);
+            return customerError!;
         }
 
-        invoice.InvoiceGeneratedAt = string.IsNullOrWhiteSpace(invoice.NcfNumber)
-            ? null
-            : DateTime.UtcNow;
-        invoice.Number = _numberGenerator.GenerateNextNumber();
+        var invoice = request.ToInvoice();
+        invoice.Date = DateOnly.FromDateTime(DateTime.UtcNow);
+        invoice.CustomerId = customer.Id;
+        invoice.CustomerName = customer.Name;
+        invoice.CustomerAddress = customer.Address;
+        invoice.CustomerContact = customer.Contact;
+        invoice.NcfNumber = null;
+        invoice.NcfCategory = null;
+        invoice.InvoiceGeneratedAt = null;
+        invoice.Number = DocumentNumberFormatter.ToInvoiceNumber(_numberGenerator.GenerateNextNumber());
 
         var savedInvoice = _repository.Add(invoice);
         var pdfBytes = _pdfService.GenerateQuotePdf(savedInvoice);
@@ -79,6 +120,46 @@ public class InvoicesController : ControllerBase
         return CreatedAtAction(nameof(GetInvoice), new { id = savedInvoice.Id }, response);
     }
 
+    [HttpPost("{id:guid}/duplicate")]
+    public ActionResult<Invoice> DuplicateInvoice(Guid id)
+    {
+        var source = GetInvoiceWithLines(id);
+        if (source is null)
+        {
+            return NotFound();
+        }
+
+        var duplicated = new Invoice
+        {
+            Id = Guid.NewGuid(),
+            Number = DocumentNumberFormatter.ToInvoiceNumber(_numberGenerator.GenerateNextNumber()),
+            Date = DateOnly.FromDateTime(DateTime.UtcNow),
+            CustomerId = source.CustomerId,
+            CustomerName = source.CustomerName,
+            CustomerAddress = source.CustomerAddress,
+            CustomerContact = source.CustomerContact,
+            CurrencyCode = source.CurrencyCode,
+            CultureName = source.CultureName,
+            ItbisRate = source.ItbisRate,
+            NcfNumber = null,
+            NcfCategory = null,
+            InvoiceGeneratedAt = null,
+            Lines = source.Lines.Select(line => new DocumentLine
+            {
+                Description = line.Description,
+                Quantity = line.Quantity,
+                UnitPrice = line.UnitPrice,
+                UnitOfMeasure = line.UnitOfMeasure
+            }).ToList()
+        };
+
+        duplicated.RecalculateTotal();
+        _context.Invoices.Add(duplicated);
+        _context.SaveChanges();
+
+        return CreatedAtAction(nameof(GetInvoice), new { id = duplicated.Id }, duplicated);
+    }
+
     [HttpGet("{id:guid}/pdf")]
     public ActionResult GetInvoicePdf(Guid id)
     {
@@ -88,12 +169,16 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var pdfBytes = _pdfService.GenerateQuotePdf(invoice);
-        return File(pdfBytes, "application/pdf", $"Quote-{invoice.Number}.pdf");
+        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, invoice.NcfNumber);
+        var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+        return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
     }
 
     [HttpGet("{id:guid}/invoice-pdf")]
-    public ActionResult GetInvoiceDocumentPdf(Guid id, [FromQuery] string? ncfNumber)
+    public ActionResult GetInvoiceDocumentPdf(
+        Guid id,
+        [FromQuery] string? ncfNumber,
+        [FromQuery] string? ncfCategory)
     {
         var invoice = GetInvoiceWithLines(id);
         if (invoice is null)
@@ -101,7 +186,13 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        if (!TryAssignNcfNumber(invoice, ncfNumber, out var normalizedNcf, out var errorResult))
+        if (!TryAssignNcfNumber(
+                invoice,
+                ncfNumber,
+                ncfCategory,
+                out var normalizedNcf,
+                out _,
+                out var errorResult))
         {
             return errorResult!;
         }
@@ -109,25 +200,6 @@ public class InvoicesController : ControllerBase
         var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, normalizedNcf);
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
-    }
-
-    [HttpGet("{id:guid}/invoice-word")]
-    public ActionResult GetInvoiceDocumentWord(Guid id, [FromQuery] string? ncfNumber)
-    {
-        var invoice = GetInvoiceWithLines(id);
-        if (invoice is null)
-        {
-            return NotFound();
-        }
-
-        if (!TryAssignNcfNumber(invoice, ncfNumber, out var normalizedNcf, out var errorResult))
-        {
-            return errorResult!;
-        }
-
-        var docBytes = _pdfService.GenerateInvoiceWord(invoice, normalizedNcf);
-        var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
-        return File(docBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"Invoice-{invoiceNumber}.docx");
     }
 
     [HttpPut("{id:guid}")]
@@ -147,25 +219,26 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        invoice.Date = request.InvoiceDate;
-        invoice.ExpirationDateOverride = request.ExpirationDate;
         invoice.CustomerName = request.CustomerName;
-        invoice.CustomerAddress = request.CustomerAddress;
-        invoice.CustomerContact = request.CustomerContact;
+        invoice.CustomerAddress = request.CustomerAddress.Trim();
+        invoice.CustomerContact = request.CustomerContact.Trim();
         invoice.CurrencyCode = request.CurrencyCode;
         invoice.CultureName = request.Locale;
         invoice.ItbisRate = request.ItbisRate;
-        var normalizedNcf = NormalizeNcfNumber(request.NcfNumber);
-        if (!string.IsNullOrWhiteSpace(normalizedNcf) &&
-            IsDuplicateNcf(normalizedNcf, invoice.Id))
+        if (!TryResolveCustomerRecord(
+                invoice.CustomerName,
+                invoice.CustomerAddress,
+                invoice.CustomerContact,
+                out var customer,
+                out var customerError))
         {
-            return DuplicateNcfConflict(normalizedNcf);
+            return customerError!;
         }
 
-        invoice.NcfNumber = normalizedNcf;
-        invoice.InvoiceGeneratedAt = string.IsNullOrWhiteSpace(normalizedNcf)
-            ? null
-            : invoice.InvoiceGeneratedAt ?? DateTime.UtcNow;
+        invoice.CustomerId = customer.Id;
+        invoice.CustomerName = customer.Name;
+        invoice.CustomerAddress = customer.Address;
+        invoice.CustomerContact = customer.Contact;
 
         var existingLines = invoice.Lines.ToList();
         if (existingLines.Count > 0)
@@ -190,6 +263,40 @@ public class InvoicesController : ControllerBase
             .Include(existing => existing.Lines)
             .FirstOrDefault(existing => existing.Id == id);
 
+    private void PopulateQuoteNumbers(IEnumerable<Invoice> invoices)
+    {
+        var invoiceList = invoices.ToList();
+        var quoteIds = invoiceList
+            .Where(invoice => invoice.QuoteId.HasValue)
+            .Select(invoice => invoice.QuoteId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (quoteIds.Count == 0)
+        {
+            return;
+        }
+
+        var quoteNumbers = _context.Quotes
+            .AsNoTracking()
+            .Where(quote => quoteIds.Contains(quote.Id))
+            .Select(quote => new { quote.Id, quote.Number })
+            .ToDictionary(quote => quote.Id, quote => quote.Number);
+
+        foreach (var invoice in invoiceList)
+        {
+            if (!invoice.QuoteId.HasValue)
+            {
+                invoice.QuoteNumber = null;
+                continue;
+            }
+
+            invoice.QuoteNumber = quoteNumbers.TryGetValue(invoice.QuoteId.Value, out var quoteNumber)
+                ? quoteNumber
+                : null;
+        }
+    }
+
     [HttpPost("{id:guid}/ncf")]
     public ActionResult<NcfAssignmentResponse> AssignNcf(Guid id, [FromBody] NcfAssignmentRequest? request)
     {
@@ -199,21 +306,39 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        if (!TryAssignNcfNumber(invoice, request?.NcfNumber, out var normalized, out var errorResult))
+        if (!TryAssignNcfNumber(
+                invoice,
+                request?.NcfNumber,
+                request?.NcfCategory,
+                out var normalizedNcf,
+                out var normalizedCategory,
+                out var errorResult))
         {
             return errorResult!;
         }
 
-        return Ok(new NcfAssignmentResponse(normalized!));
+        return Ok(new NcfAssignmentResponse(
+            normalizedNcf!,
+            normalizedCategory ?? NcfCategoryCatalog.DefaultCategoryCode));
     }
 
     private bool TryAssignNcfNumber(
         Invoice invoice,
         string? requestedNcf,
+        string? requestedCategory,
         out string? normalizedNcf,
+        out string? normalizedCategory,
         out ActionResult? errorResult)
     {
-        normalizedNcf = NormalizeNcfNumber(requestedNcf);
+        if (!TryResolveNcfData(
+                requestedNcf,
+                requestedCategory,
+                out normalizedNcf,
+                out normalizedCategory,
+                out errorResult))
+        {
+            return false;
+        }
 
         if (!string.IsNullOrWhiteSpace(normalizedNcf) &&
             IsDuplicateNcf(normalizedNcf, invoice.Id))
@@ -225,15 +350,30 @@ public class InvoicesController : ControllerBase
         if (!string.IsNullOrWhiteSpace(normalizedNcf))
         {
             invoice.NcfNumber = normalizedNcf;
+            invoice.NcfCategory = normalizedCategory ?? invoice.NcfCategory;
         }
         else if (string.IsNullOrWhiteSpace(invoice.NcfNumber))
         {
-            invoice.NcfNumber = _ncfNumberGenerator.GenerateNextNumber();
+            var categoryForGeneration = normalizedCategory
+                ?? invoice.NcfCategory
+                ?? NcfCategoryCatalog.DefaultCategoryCode;
+
+            invoice.NcfCategory = categoryForGeneration;
+            invoice.NcfNumber = _ncfNumberGenerator.GenerateNextNumber(categoryForGeneration);
             normalizedNcf = invoice.NcfNumber;
         }
         else
         {
             normalizedNcf = invoice.NcfNumber;
+            if (!string.IsNullOrWhiteSpace(normalizedCategory) &&
+                NcfCategoryCatalog.TryInferCategoryFromNcf(invoice.NcfNumber, out var existingDefinition) &&
+                !string.Equals(normalizedCategory, existingDefinition.Code, StringComparison.OrdinalIgnoreCase))
+            {
+                errorResult = NcfCategoryMismatchBadRequest(existingDefinition.Code, normalizedCategory);
+                return false;
+            }
+
+            normalizedCategory ??= invoice.NcfCategory;
         }
 
         if (string.IsNullOrWhiteSpace(invoice.NcfNumber))
@@ -245,6 +385,15 @@ public class InvoicesController : ControllerBase
             });
             return false;
         }
+
+        if (string.IsNullOrWhiteSpace(normalizedCategory) &&
+            NcfCategoryCatalog.TryInferCategoryFromNcf(invoice.NcfNumber, out var inferredDefinition))
+        {
+            normalizedCategory = inferredDefinition.Code;
+        }
+
+        normalizedCategory ??= NcfCategoryCatalog.DefaultCategoryCode;
+        invoice.NcfCategory ??= normalizedCategory;
 
         if (IsDuplicateNcf(invoice.NcfNumber!, invoice.Id))
         {
@@ -271,6 +420,72 @@ public class InvoicesController : ControllerBase
             Detail = $"The NCF \"{normalizedNcf}\" is already assigned to another invoice.",
         });
 
+    private bool TryResolveNcfData(
+        string? ncfNumber,
+        string? categoryCode,
+        out string? normalizedNcf,
+        out string? normalizedCategory,
+        out ActionResult? errorResult)
+    {
+        normalizedNcf = NormalizeNcfNumber(ncfNumber);
+        if (!TryNormalizeCategoryCode(categoryCode, out normalizedCategory, out errorResult))
+        {
+            return false;
+        }
+
+        if (NcfCategoryCatalog.TryInferCategoryFromNcf(normalizedNcf, out var inferredDefinition))
+        {
+            if (!string.IsNullOrWhiteSpace(normalizedCategory) &&
+                !string.Equals(normalizedCategory, inferredDefinition.Code, StringComparison.OrdinalIgnoreCase))
+            {
+                errorResult = NcfCategoryMismatchBadRequest(inferredDefinition.Code, normalizedCategory);
+                return false;
+            }
+
+            normalizedCategory = inferredDefinition.Code;
+        }
+
+        errorResult = null;
+        return true;
+    }
+
+    private bool TryNormalizeCategoryCode(
+        string? categoryCode,
+        out string? normalizedCategory,
+        out ActionResult? errorResult)
+    {
+        normalizedCategory = null;
+        if (string.IsNullOrWhiteSpace(categoryCode))
+        {
+            errorResult = null;
+            return true;
+        }
+
+        if (!NcfCategoryCatalog.TryGetByCode(categoryCode, out var definition))
+        {
+            errorResult = InvalidNcfCategoryBadRequest(categoryCode.Trim());
+            return false;
+        }
+
+        normalizedCategory = definition.Code;
+        errorResult = null;
+        return true;
+    }
+
+    private ActionResult InvalidNcfCategoryBadRequest(string providedCategory) =>
+        BadRequest(new ProblemDetails
+        {
+            Title = "Invalid NCF category",
+            Detail = $"The NCF category \"{providedCategory}\" is not supported.",
+        });
+
+    private ActionResult NcfCategoryMismatchBadRequest(string inferredCategory, string providedCategory) =>
+        BadRequest(new ProblemDetails
+        {
+            Title = "NCF category mismatch",
+            Detail = $"The NCF value belongs to category \"{inferredCategory}\" but \"{providedCategory}\" was requested.",
+        });
+
     private static string? NormalizeNcfNumber(string? ncfNumber)
     {
         if (string.IsNullOrWhiteSpace(ncfNumber))
@@ -278,22 +493,74 @@ public class InvoicesController : ControllerBase
             return null;
         }
 
-        var trimmed = ncfNumber.Trim();
-        const string prefix = "NCF";
+        var trimmed = ncfNumber.Trim().ToUpperInvariant();
+        var compact = new string(trimmed.Where(ch => ch != '-' && !char.IsWhiteSpace(ch)).ToArray());
+        const string ncfPrefix = "NCF";
 
-        if (trimmed.Length >= prefix.Length &&
-            trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        if (compact.Length >= ncfPrefix.Length &&
+            compact.StartsWith(ncfPrefix, StringComparison.Ordinal))
         {
-            var suffix = trimmed[prefix.Length..];
+            var suffix = compact[ncfPrefix.Length..];
             if (string.IsNullOrWhiteSpace(suffix))
             {
                 return null;
             }
 
-            return $"{prefix}{suffix}";
+            return $"{ncfPrefix}-{suffix}";
         }
 
-        var joiner = char.IsLetterOrDigit(trimmed[0]) ? " " : string.Empty;
-        return $"{prefix}{joiner}{trimmed}";
+        var normalizedKnown = NcfCategoryCatalog.TryNormalizeKnownNcfNumber(compact);
+        if (!string.IsNullOrWhiteSpace(normalizedKnown))
+        {
+            return normalizedKnown;
+        }
+
+        return trimmed;
+    }
+
+    private bool TryResolveCustomerRecord(
+        string? customerName,
+        string? customerAddress,
+        string? customerContact,
+        out Customer customer,
+        out ActionResult? errorResult)
+    {
+        customer = default!;
+        var normalizedName = customerName?.Trim() ?? string.Empty;
+        var normalizedAddress = customerAddress?.Trim() ?? string.Empty;
+        var normalizedContact = customerContact?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(normalizedName) ||
+            string.IsNullOrWhiteSpace(normalizedAddress) ||
+            string.IsNullOrWhiteSpace(normalizedContact))
+        {
+            errorResult = BadRequest(new ProblemDetails
+            {
+                Title = "Customer details required",
+                Detail = "Customer name, address, and contact are required.",
+            });
+            return false;
+        }
+
+        customer = _context.Customers
+            .FirstOrDefault(existing => existing.Name == normalizedName)
+            ?? new Customer
+            {
+                Id = Guid.NewGuid(),
+                Name = normalizedName,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+        customer.Address = normalizedAddress;
+        customer.Contact = normalizedContact;
+        customer.UpdatedAt = DateTime.UtcNow;
+
+        if (_context.Entry(customer).State == EntityState.Detached)
+        {
+            _context.Customers.Add(customer);
+        }
+
+        errorResult = null;
+        return true;
     }
 }
