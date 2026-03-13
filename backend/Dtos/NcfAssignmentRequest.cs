@@ -1,6 +1,6 @@
 namespace IORManager.Dtos;
 
-public record NcfAssignmentRequest(string? NcfNumber, string? NcfCategory);
+public record NcfAssignmentRequest(string? NcfNumber, string? NcfCategory, bool SkipNcf = false);
 
 public record NcfAssignmentResponse(string NcfNumber, string NcfCategory);
 

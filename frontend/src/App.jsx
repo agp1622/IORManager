@@ -416,6 +416,7 @@ function App() {
     invoiceId: null,
     suffix: '',
     category: DEFAULT_NCF_CATEGORY,
+    skipNcf: false,
     isLoading: false,
     error: null,
   })
@@ -1114,17 +1115,18 @@ function App() {
   )
 
   const convertQuoteToInvoice = useCallback(
-    async (quoteId, ncfValue, ncfCategory) => {
+    async (quoteId, ncfValue, ncfCategory, skipNcf = false) => {
       const normalizedCategory =
         normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
 
       const response = await fetch(`${API_BASE_URL}/Quotes/${quoteId}/convert`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ncfNumber: ncfValue || null,
-          ncfCategory: normalizedCategory,
-        }),
+        body: JSON.stringify(
+          skipNcf
+            ? { skipNcf: true }
+            : { ncfNumber: ncfValue || null, ncfCategory: normalizedCategory },
+        ),
       })
 
       const body = await response.json().catch(() => null)
@@ -1242,7 +1244,7 @@ function App() {
   )
 
   const handleGenerateInvoice = useCallback(
-    async (doc, ncfOverride = null, categoryOverride = null) => {
+    async (doc, ncfOverride = null, categoryOverride = null, skipNcf = false) => {
       if (!doc?.id) {
         return
       }
@@ -1252,7 +1254,7 @@ function App() {
         if (doc.convertedInvoiceId) {
           await downloadInvoicePdfById(doc.convertedInvoiceId, doc.number || doc.id)
         } else {
-          const conversion = await convertQuoteToInvoice(doc.id, ncfOverride, categoryOverride)
+          const conversion = await convertQuoteToInvoice(doc.id, ncfOverride, categoryOverride, skipNcf)
           await downloadInvoicePdfById(conversion.invoiceId, conversion.invoiceNumber || doc.number || doc.id)
         }
 
@@ -1415,6 +1417,7 @@ function App() {
       invoiceId: null,
       suffix: '',
       category: DEFAULT_NCF_CATEGORY,
+      skipNcf: false,
       isLoading: false,
       error: null,
     })
@@ -1428,7 +1431,7 @@ function App() {
     const normalizedCategory =
       normalizeNcfCategory(ncfDialog.category, ncfCategories) || DEFAULT_NCF_CATEGORY
     const ncfNumber = buildNcfNumber(normalizedCategory, ncfDialog.suffix)
-    if (!ncfNumber) {
+    if (!ncfDialog.skipNcf && !ncfNumber) {
       setNcfDialog((current) => ({
         ...current,
         error: translate('pdf.ncfRequired'),
@@ -1452,8 +1455,9 @@ function App() {
       } else {
         await handleGenerateInvoice(
           ncfDialog.document,
-          ncfNumber,
-          normalizedCategory,
+          ncfDialog.skipNcf ? null : ncfNumber,
+          ncfDialog.skipNcf ? null : normalizedCategory,
+          ncfDialog.skipNcf,
         )
       }
 
@@ -1464,6 +1468,7 @@ function App() {
         invoiceId: null,
         suffix: '',
         category: DEFAULT_NCF_CATEGORY,
+        skipNcf: false,
         isLoading: false,
         error: null,
       })
@@ -1486,6 +1491,7 @@ function App() {
     ncfDialog.document,
     ncfDialog.invoiceId,
     ncfDialog.mode,
+    ncfDialog.skipNcf,
     ncfDialog.suffix,
     translate,
     updateInvoiceNcf,
@@ -1914,7 +1920,20 @@ function App() {
                 {ncfDialog.error}
               </div>
             ) : null}
-            <label className="modal-input">
+            {!isNcfEditMode ? (
+              <label className="modal-input modal-input--checkbox">
+                <input
+                  type="checkbox"
+                  checked={ncfDialog.skipNcf}
+                  onChange={(event) =>
+                    setNcfDialog((current) => ({ ...current, skipNcf: event.target.checked, error: null }))
+                  }
+                  disabled={ncfDialog.isLoading}
+                />
+                {translate('pdf.ncfSkipLabel')}
+              </label>
+            ) : null}
+            <label className="modal-input" aria-disabled={ncfDialog.skipNcf || undefined}>
               {translate('invoiceForm.ncfCategoryLabel')}
               <select
                 value={ncfDialog.category}
@@ -1930,7 +1949,7 @@ function App() {
                     }
                   })
                 }
-                disabled={ncfDialog.isLoading}
+                disabled={ncfDialog.isLoading || ncfDialog.skipNcf}
               >
                 {ncfCategories.map((option) => (
                   <option key={option.code} value={option.code}>
@@ -1940,7 +1959,7 @@ function App() {
               </select>
             </label>
             <p className="input-hint">{translate('invoiceForm.ncfCategoryHint')}</p>
-            <label className="modal-input">
+            <label className="modal-input" aria-disabled={ncfDialog.skipNcf || undefined}>
               {translate('documentList.ncfLabel')}
               <div className="ncf-input-group">
                 <span className="ncf-input-group__prefix">{ncfDialog.category}</span>
@@ -1958,7 +1977,7 @@ function App() {
                   }
                   placeholder={ncfDialogSuffixPlaceholder}
                   maxLength={ncfDialogSequenceLength}
-                  disabled={ncfDialog.isLoading}
+                  disabled={ncfDialog.isLoading || ncfDialog.skipNcf}
                 />
               </div>
             </label>
@@ -1976,7 +1995,7 @@ function App() {
                 type="button"
                 className="button"
                 onClick={handleConfirmNcfDialog}
-                disabled={ncfDialog.isLoading || !ncfDialog.suffix.trim()}
+                disabled={ncfDialog.isLoading || (!ncfDialog.skipNcf && !ncfDialog.suffix.trim())}
               >
                 {ncfDialog.isLoading
                   ? translate(isNcfEditMode ? 'documentList.editingNcf' : 'documentList.generatingInvoice')

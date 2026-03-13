@@ -228,15 +228,19 @@ public class QuotesController : ControllerBase
             return DuplicateNcfConflict(normalizedNcf);
         }
 
-        var categoryForGeneration = normalizedCategory ?? NcfCategoryCatalog.DefaultCategoryCode;
-        if (string.IsNullOrWhiteSpace(normalizedNcf))
+        string? categoryForGeneration = null;
+        if (request?.SkipNcf != true)
         {
-            normalizedNcf = _ncfNumberGenerator.GenerateNextNumber(categoryForGeneration);
-        }
+            categoryForGeneration = normalizedCategory ?? NcfCategoryCatalog.DefaultCategoryCode;
+            if (string.IsNullOrWhiteSpace(normalizedNcf))
+            {
+                normalizedNcf = _ncfNumberGenerator.GenerateNextNumber(categoryForGeneration);
+            }
 
-        if (IsDuplicateNcf(normalizedNcf))
-        {
-            return DuplicateNcfConflict(normalizedNcf);
+            if (IsDuplicateNcf(normalizedNcf))
+            {
+                return DuplicateNcfConflict(normalizedNcf);
+            }
         }
 
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(_numberGenerator.GenerateNextNumber());
@@ -260,7 +264,7 @@ public class QuotesController : ControllerBase
             QuoteId = quote.Id,
             ItbisRate = quote.ItbisRate,
             NcfNumber = normalizedNcf,
-            NcfCategory = normalizedCategory ?? categoryForGeneration,
+            NcfCategory = normalizedCategory ?? categoryForGeneration ?? null,
             InvoiceGeneratedAt = generatedAt,
             Lines = quote.Lines.Select(line => new DocumentLine
             {

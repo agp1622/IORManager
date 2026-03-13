@@ -230,6 +230,7 @@ const translations = {
       ncfUpdated: 'NCF updated successfully.',
       ncfEditMissingInvoice: 'This quote has no linked invoice to edit.',
       ncfDialogCancel: 'Cancel',
+      ncfSkipLabel: 'Generate invoice without NCF',
     },
     ncfCategories: {
       B01: 'Tax Credit Invoice',
@@ -501,6 +502,7 @@ const translations = {
       ncfUpdated: 'NCF actualizado correctamente.',
       ncfEditMissingInvoice: 'Esta cotización no tiene una factura vinculada para editar.',
       ncfDialogCancel: 'Cancelar',
+      ncfSkipLabel: 'Generar factura sin NCF',
     },
     ncfCategories: {
       B01: 'Factura de Crédito Fiscal',
