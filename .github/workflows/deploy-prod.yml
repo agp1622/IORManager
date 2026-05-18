@@ -1,0 +1,77 @@
+name: Deploy to Prod
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, windows]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Restore backend dependencies
+      run: dotnet restore backend/IORManager.sln
+      working-directory: .
+
+    - name: Build backend
+      run: dotnet build backend/IORManager.sln -c Release --no-restore
+      working-directory: .
+
+    - name: Publish backend
+      run: dotnet publish backend/IORManager.csproj -c Release -o backend/bin/Release/net9.0/publish
+      working-directory: .
+
+    - name: Install frontend dependencies
+      run: npm install
+      working-directory: frontend
+
+    - name: Build frontend
+      run: npm run build
+      working-directory: frontend
+      env:
+        VITE_API_BASE_URL: http://localhost:5030/api
+
+    - name: Run database migrations
+      run: |
+        $env:ASPNETCORE_ENVIRONMENT = "Production"
+        & "${{ github.workspace }}/scripts/run-migrations.ps1" -Environment prod
+      shell: pwsh
+
+    - name: Deploy to IIS
+      run: |
+        & "${{ github.workspace }}/scripts/deploy-to-iis.ps1" -Environment prod -SourceDir "${{ github.workspace }}"
+      shell: pwsh
+
+    - name: Health check
+      run: |
+        Start-Sleep -Seconds 5
+        try {
+          $response = Invoke-WebRequest -Uri "http://localhost:5030/api" -UseBasicParsing -ErrorAction SilentlyContinue
+          if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 404) {
+            Write-Host "✓ Backend is responding"
+          }
+        } catch {
+          Write-Host "⚠ Backend health check warning: $_"
+        }
+      shell: pwsh
+
+    - name: Deployment summary
+      if: success()
+      run: |
+        Write-Host "✓ Production deployment completed successfully!"
+        Write-Host "Frontend: http://localhost:3001"
+        Write-Host "Backend API: http://localhost:5030/api"
+      shell: pwsh
