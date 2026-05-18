@@ -8,6 +8,7 @@ public class Quote : FinancialDocument
     public Quote()
     {
         Lines = new List<DocumentLine>();
+        Attachments = new List<QuoteAttachment>();
     }
 
     [Column(TypeName = "decimal(5,4)")]
@@ -31,6 +32,14 @@ public class Quote : FinancialDocument
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
 
+    /// <summary>The customer's purchase order number / reference that authorized this quote.</summary>
+    [MaxLength(100)]
+    public string? CustomerPONumber { get; set; }
+
+    /// <summary>Free-form internal or client-facing comments for this quote.</summary>
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+
     public Guid? ConvertedInvoiceId { get; set; }
     public DateTime? ConvertedAt { get; set; }
 
@@ -40,7 +49,20 @@ public class Quote : FinancialDocument
     [NotMapped]
     public DateOnly ExpirationDate => Date.AddMonths(1);
 
+    /// <summary>Sum of TotalAmount for all PurchaseOrders linked to this quote. Populated by the controller, not persisted.</summary>
+    [NotMapped]
+    public decimal TotalExpenses { get; set; }
+
+    /// <summary>Number of PurchaseOrders linked to this quote. Populated by the controller, not persisted.</summary>
+    [NotMapped]
+    public int ExpenseCount { get; set; }
+
+    /// <summary>Revenue (TotalAmount) minus linked expenses. Meaningful only when TotalExpenses has been populated.</summary>
+    [NotMapped]
+    public decimal Profit => TotalAmount - TotalExpenses;
+
     public List<DocumentLine> Lines { get; set; }
+    public List<QuoteAttachment> Attachments { get; set; }
 
     public void RecalculateTotal()
     {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import InvoiceForm from './components/InvoiceForm'
 import ReceiptForm from './components/ReceiptForm'
+import PurchaseOrderForm from './components/PurchaseOrderForm'
 import Modal from './components/Modal'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
@@ -21,6 +22,7 @@ const BRAND_NOTES = {
   quotes: 'Cotizaciones impactantes listas para convertirse en facturas.',
   invoices: 'Facturas fiscales listas para control, descarga y seguimiento.',
   receipts: 'Recibos elegantes que transmiten confianza y precisión.',
+  purchaseOrders: 'Órdenes de compra con trazabilidad y documentación completa.',
   default: 'Documentos oficiales con el sello PAPAVELAG.',
 }
 
@@ -115,6 +117,24 @@ const createSectionConfig = (t) => ({
     createDescription: t('sections.receipts.createDescription'),
     createSuccess: t('sections.receipts.createSuccess'),
     createError: t('sections.receipts.createError'),
+  },
+  purchaseOrders: {
+    title: t('sections.purchaseOrders.title'),
+    description: t('sections.purchaseOrders.description'),
+    endpoint: 'PurchaseOrders',
+    singular: t('sections.purchaseOrders.singular'),
+    partyLabel: t('sections.purchaseOrders.partyLabel'),
+    loading: t('sections.purchaseOrders.loading'),
+    empty: t('sections.purchaseOrders.empty'),
+    loadError: t('sections.purchaseOrders.loadError'),
+    createHeading: t('sections.purchaseOrders.createHeading'),
+    createDescription: t('sections.purchaseOrders.createDescription'),
+    createSuccess: t('sections.purchaseOrders.createSuccess'),
+    createError: t('sections.purchaseOrders.createError'),
+  },
+  ncfSequences: {
+    title: 'Secuencias NCF',
+    // No endpoint — data comes from fiscalRegimes loaded separately
   },
 })
 
@@ -219,6 +239,9 @@ const DocumentList = ({
             <th scope="col" aria-sort={getAriaSort('total')}>
               {renderSortButton(t('documentList.total'), 'total')}
             </th>
+            {isQuoteList ? (
+              <th scope="col">{t('documentList.profitLabel')}</th>
+            ) : null}
             <th scope="col" aria-sort={getAriaSort('currency')}>
               {renderSortButton(t('documentList.currency'), 'currency')}
             </th>
@@ -272,6 +295,28 @@ const DocumentList = ({
                 <td data-heading={t('documentList.total')}>
                   {formatCurrency(document.totalAmount, currencyCode, cultureName)}
                 </td>
+                {isQuoteList ? (() => {
+                  const hasExpenses = Number(document.totalExpenses) > 0
+                  if (!hasExpenses) {
+                    return (
+                      <td data-heading={t('documentList.profitLabel')} className="profit-cell profit-cell--none">
+                        {t('documentList.profitNoExpenses')}
+                      </td>
+                    )
+                  }
+                  const profit = Number(document.totalAmount) - Number(document.totalExpenses)
+                  const isPositive = profit >= 0
+                  return (
+                    <td data-heading={t('documentList.profitLabel')} className={`profit-cell ${isPositive ? 'profit-cell--positive' : 'profit-cell--negative'}`}>
+                      <span className="profit-cell__amount">
+                        {formatCurrency(profit, currencyCode, cultureName)}
+                      </span>
+                      <span className="profit-cell__expenses">
+                        {t('documentList.expensesLabel')}: {formatCurrency(document.totalExpenses, currencyCode, cultureName)}
+                      </span>
+                    </td>
+                  )
+                })() : null}
                 <td data-heading={t('documentList.currency')}>
                   {currencyCode || '—'}
                 </td>
@@ -390,6 +435,7 @@ function App() {
     quotes: [],
     invoices: [],
     receipts: [],
+    purchaseOrders: [],
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -402,11 +448,34 @@ function App() {
   const [updatingNcfId, setUpdatingNcfId] = useState(null)
   const [duplicatingQuoteId, setDuplicatingQuoteId] = useState(null)
   const [apiNcfCategories, setApiNcfCategories] = useState([])
+  const [fiscalRegimes, setFiscalRegimes] = useState([])
   const [customers, setCustomers] = useState([])
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
   const [editingQuote, setEditingQuote] = useState(null)
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
-  const [pageBySection, setPageBySection] = useState({ quotes: 1, invoices: 1, receipts: 1 })
+  const [editingPO, setEditingPO] = useState(null)
+  const [prefillPOQuoteId, setPrefillPOQuoteId] = useState(null)
+  const [pageBySection, setPageBySection] = useState({ quotes: 1, invoices: 1, receipts: 1, purchaseOrders: 1 })
+  const [attachmentsDialog, setAttachmentsDialog] = useState({
+    isOpen: false,
+    documentId: null,
+    documentNumber: null,
+    attachments: [],
+    isLoading: false,
+    isUploading: false,
+    deletingId: null,
+    error: null,
+  })
+  const [quoteAttachmentsDialog, setQuoteAttachmentsDialog] = useState({
+    isOpen: false,
+    documentId: null,
+    documentNumber: null,
+    attachments: [],
+    isLoading: false,
+    isUploading: false,
+    deletingId: null,
+    error: null,
+  })
   const previewUrlRef = useRef(null)
   const [previewingId, setPreviewingId] = useState(null)
   const [ncfDialog, setNcfDialog] = useState({
@@ -417,6 +486,14 @@ function App() {
     suffix: '',
     category: DEFAULT_NCF_CATEGORY,
     skipNcf: false,
+    isLoading: false,
+    error: null,
+  })
+  const [editSequenceDialog, setEditSequenceDialog] = useState({
+    isOpen: false,
+    categoryCode: '',
+    categoryName: '',
+    inputValue: '',
     isLoading: false,
     error: null,
   })
@@ -485,7 +562,7 @@ function App() {
   const loadSection = useCallback(
     async (sectionKey) => {
       const config = sectionConfig[sectionKey]
-      if (!config) {
+      if (!config?.endpoint) {
         return
       }
 
@@ -554,9 +631,24 @@ function App() {
     loadSection(activeSection)
   }, [activeSection, loadSection])
 
+  const loadFiscalRegimes = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/Invoices/fiscal-regimes`)
+      if (!response.ok) return
+      const data = await response.json()
+      if (Array.isArray(data)) setFiscalRegimes(data)
+    } catch {
+      // Optional — modal still works without it
+    }
+  }, [])
+
   useEffect(() => {
     loadCustomers()
   }, [loadCustomers])
+
+  useEffect(() => {
+    loadFiscalRegimes()
+  }, [loadFiscalRegimes])
 
   useEffect(() => {
     let isMounted = true
@@ -866,6 +958,8 @@ function App() {
   const isQuotesSection = activeSection === 'quotes'
   const isInvoicesSection = activeSection === 'invoices'
   const isReceiptsSection = activeSection === 'receipts'
+  const isPurchaseOrdersSection = activeSection === 'purchaseOrders'
+  const isNcfSequencesSection = activeSection === 'ncfSequences'
   const isEditingQuote = isQuotesSection && Boolean(editingQuote)
   const brandNote =
     BRAND_NOTES[activeSection] ??
@@ -1091,6 +1185,68 @@ function App() {
       return created
     },
     [editingQuote, handleCreate, handleUpdateQuote],
+  )
+
+  const handleEditPO = useCallback((doc) => {
+    setEditingPO(doc)
+    setStatus(null)
+    setActiveSection('purchaseOrders')
+  }, [])
+
+  const handleCancelEditPO = useCallback(() => {
+    setEditingPO(null)
+    setPrefillPOQuoteId(null)
+    setStatus(null)
+  }, [])
+
+  const handleLogExpense = useCallback((doc) => {
+    setEditingPO(null)
+    setPrefillPOQuoteId(doc.id)
+    setStatus(null)
+    setActiveSection('purchaseOrders')
+  }, [])
+
+  const handleUpdatePO = useCallback(
+    async (poId, payload) => {
+      setIsSubmitting(true)
+      setStatus(null)
+      try {
+        const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${poId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!response.ok) {
+          let detail = translate('purchaseOrderForm.updateError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch { /* ignore */ }
+          throw new Error(detail)
+        }
+        setStatus({ type: 'success', message: translate('purchaseOrderForm.updateSuccess') })
+        await loadSection('purchaseOrders')
+        return true
+      } catch (error) {
+        setStatus({ type: 'error', message: error.message || translate('purchaseOrderForm.updateError') })
+        return false
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [loadSection, translate],
+  )
+
+  const handlePOSubmit = useCallback(
+    async (payload) => {
+      if (editingPO) {
+        const wasSuccessful = await handleUpdatePO(editingPO.id, payload)
+        if (wasSuccessful) setEditingPO(null)
+        return wasSuccessful
+      }
+      return handleCreate('purchaseOrders', payload)
+    },
+    [editingPO, handleCreate, handleUpdatePO],
   )
 
   const downloadInvoicePdfById = useCallback(
@@ -1472,7 +1628,7 @@ function App() {
         isLoading: false,
         error: null,
       })
-      await Promise.all([loadSection('quotes'), loadSection('invoices')])
+      await Promise.all([loadSection('quotes'), loadSection('invoices'), loadFiscalRegimes()])
     } catch (error) {
       setNcfDialog((current) => ({
         ...current,
@@ -1485,6 +1641,7 @@ function App() {
   }, [
     buildNcfNumber,
     handleGenerateInvoice,
+    loadFiscalRegimes,
     loadSection,
     ncfCategories,
     ncfDialog.category,
@@ -1523,6 +1680,276 @@ function App() {
     [loadSection, translate, undoQuoteConversion],
   )
 
+  const handleOpenAttachmentsDialog = useCallback(async (doc) => {
+    if (!doc?.id) return
+
+    setAttachmentsDialog({
+      isOpen: true,
+      documentId: doc.id,
+      documentNumber: doc.number || doc.id,
+      attachments: [],
+      isLoading: true,
+      isUploading: false,
+      deletingId: null,
+      error: null,
+    })
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${doc.id}/attachments`)
+      if (!response.ok) throw new Error(translate('purchaseOrderForm.attachmentsLoading'))
+      const data = await response.json()
+      setAttachmentsDialog((current) => ({
+        ...current,
+        attachments: Array.isArray(data) ? data : [],
+        isLoading: false,
+      }))
+    } catch {
+      setAttachmentsDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: translate('purchaseOrderForm.attachUploadError'),
+      }))
+    }
+  }, [translate])
+
+  const handleCloseAttachmentsDialog = useCallback(() => {
+    setAttachmentsDialog({
+      isOpen: false,
+      documentId: null,
+      documentNumber: null,
+      attachments: [],
+      isLoading: false,
+      isUploading: false,
+      deletingId: null,
+      error: null,
+    })
+  }, [])
+
+  const handleUploadAttachment = useCallback(async (file) => {
+    const { documentId } = attachmentsDialog
+    if (!documentId || !file) return
+
+    setAttachmentsDialog((current) => ({ ...current, isUploading: true, error: null }))
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${documentId}/attachments`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || body?.title || translate('purchaseOrderForm.attachUploadError'))
+      }
+
+      const newAttachment = await response.json()
+      setAttachmentsDialog((current) => ({
+        ...current,
+        attachments: [...current.attachments, newAttachment],
+        isUploading: false,
+      }))
+    } catch (err) {
+      setAttachmentsDialog((current) => ({
+        ...current,
+        isUploading: false,
+        error: err.message || translate('purchaseOrderForm.attachUploadError'),
+      }))
+    }
+  }, [attachmentsDialog, translate])
+
+  const handleDeleteAttachment = useCallback(async (attachmentId) => {
+    const { documentId } = attachmentsDialog
+    if (!documentId) return
+
+    setAttachmentsDialog((current) => ({ ...current, deletingId: attachmentId, error: null }))
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/PurchaseOrders/${documentId}/attachments/${attachmentId}`,
+        { method: 'DELETE' },
+      )
+
+      if (!response.ok) throw new Error(translate('purchaseOrderForm.attachDeleteError'))
+
+      setAttachmentsDialog((current) => ({
+        ...current,
+        attachments: current.attachments.filter((a) => a.id !== attachmentId),
+        deletingId: null,
+      }))
+    } catch (err) {
+      setAttachmentsDialog((current) => ({
+        ...current,
+        deletingId: null,
+        error: err.message || translate('purchaseOrderForm.attachDeleteError'),
+      }))
+    }
+  }, [attachmentsDialog, translate])
+
+  const handleDownloadAttachment = useCallback(async (attachment) => {
+    const { documentId } = attachmentsDialog
+    if (!documentId) return
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/PurchaseOrders/${documentId}/attachments/${attachment.id}/download`,
+      )
+      if (!response.ok) throw new Error(translate('pdf.downloadError'))
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = window.document.createElement('a')
+      link.href = url
+      link.download = attachment.fileName || `attachment-${attachment.id}`
+      window.document.body.appendChild(link)
+      link.click()
+      window.document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setAttachmentsDialog((current) => ({
+        ...current,
+        error: translate('pdf.downloadError'),
+      }))
+    }
+  }, [attachmentsDialog, translate])
+
+  const handleOpenQuoteAttachmentsDialog = useCallback(async (doc) => {
+    if (!doc?.id) return
+
+    setQuoteAttachmentsDialog({
+      isOpen: true,
+      documentId: doc.id,
+      documentNumber: doc.number || doc.id,
+      attachments: [],
+      isLoading: true,
+      isUploading: false,
+      deletingId: null,
+      error: null,
+    })
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/Quotes/${doc.id}/attachments`)
+      if (!response.ok) throw new Error(translate('quoteAttachments.attachmentsLoading'))
+      const data = await response.json()
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        attachments: Array.isArray(data) ? data : [],
+        isLoading: false,
+      }))
+    } catch {
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: translate('quoteAttachments.attachUploadError'),
+      }))
+    }
+  }, [translate])
+
+  const handleCloseQuoteAttachmentsDialog = useCallback(() => {
+    setQuoteAttachmentsDialog({
+      isOpen: false,
+      documentId: null,
+      documentNumber: null,
+      attachments: [],
+      isLoading: false,
+      isUploading: false,
+      deletingId: null,
+      error: null,
+    })
+  }, [])
+
+  const handleUploadQuoteAttachment = useCallback(async (file) => {
+    const { documentId } = quoteAttachmentsDialog
+    if (!documentId || !file) return
+
+    setQuoteAttachmentsDialog((current) => ({ ...current, isUploading: true, error: null }))
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(`${API_BASE_URL}/Quotes/${documentId}/attachments`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || body?.title || translate('quoteAttachments.attachUploadError'))
+      }
+
+      const newAttachment = await response.json()
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        attachments: [...current.attachments, newAttachment],
+        isUploading: false,
+      }))
+    } catch (err) {
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        isUploading: false,
+        error: err.message || translate('quoteAttachments.attachUploadError'),
+      }))
+    }
+  }, [quoteAttachmentsDialog, translate])
+
+  const handleDeleteQuoteAttachment = useCallback(async (attachmentId) => {
+    const { documentId } = quoteAttachmentsDialog
+    if (!documentId) return
+
+    setQuoteAttachmentsDialog((current) => ({ ...current, deletingId: attachmentId, error: null }))
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/Quotes/${documentId}/attachments/${attachmentId}`,
+        { method: 'DELETE' },
+      )
+
+      if (!response.ok) throw new Error(translate('quoteAttachments.attachDeleteError'))
+
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        attachments: current.attachments.filter((a) => a.id !== attachmentId),
+        deletingId: null,
+      }))
+    } catch (err) {
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        deletingId: null,
+        error: err.message || translate('quoteAttachments.attachDeleteError'),
+      }))
+    }
+  }, [quoteAttachmentsDialog, translate])
+
+  const handleDownloadQuoteAttachment = useCallback(async (attachment) => {
+    const { documentId } = quoteAttachmentsDialog
+    if (!documentId) return
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/Quotes/${documentId}/attachments/${attachment.id}/download`,
+      )
+      if (!response.ok) throw new Error(translate('pdf.downloadError'))
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = window.document.createElement('a')
+      link.href = url
+      link.download = attachment.fileName || `attachment-${attachment.id}`
+      window.document.body.appendChild(link)
+      link.click()
+      window.document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setQuoteAttachmentsDialog((current) => ({
+        ...current,
+        error: translate('pdf.downloadError'),
+      }))
+    }
+  }, [quoteAttachmentsDialog, translate])
+
   const documentExtraActions = useMemo(() => {
     const previewAction = {
       label: translate('documentList.preview'),
@@ -1542,6 +1969,13 @@ function App() {
           variant: 'button--ghost',
         },
         previewAction,
+        {
+          label: translate('quoteAttachments.attachmentsAction'),
+          loadingLabel: translate('quoteAttachments.attachmentsLoading'),
+          busyId: null,
+          onClick: handleOpenQuoteAttachmentsDialog,
+          variant: 'button--ghost',
+        },
         {
           label: translate('documentList.duplicateQuote'),
           loadingLabel: translate('documentList.duplicatingQuote'),
@@ -1584,6 +2018,13 @@ function App() {
           onClick: handleUndoConvertedInvoice,
           variant: 'button--ghost',
         },
+        {
+          label: translate('purchaseOrderForm.logExpenseAction'),
+          loadingLabel: translate('purchaseOrderForm.logExpenseAction'),
+          busyId: null,
+          onClick: handleLogExpense,
+          variant: 'button--ghost',
+        },
       ]
     }
 
@@ -1602,18 +2043,43 @@ function App() {
       ]
     }
 
+    if (isPurchaseOrdersSection) {
+      return [
+        previewAction,
+        {
+          label: translate('purchaseOrderForm.attachmentsAction'),
+          loadingLabel: translate('purchaseOrderForm.attachmentsLoading'),
+          busyId: null,
+          onClick: handleOpenAttachmentsDialog,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('purchaseOrderForm.editAction'),
+          loadingLabel: translate('purchaseOrderForm.editAction'),
+          busyId: null,
+          onClick: handleEditPO,
+          variant: 'button--ghost',
+        },
+      ]
+    }
+
     return [previewAction]
   }, [
     duplicatingQuoteId,
     editingQuote?.id,
     handleDuplicateQuote,
+    handleEditPO,
     handleEditQuote,
     handleGenerateInvoice,
+    handleLogExpense,
+    handleOpenAttachmentsDialog,
     handleOpenNcfDialog,
+    handleOpenQuoteAttachmentsDialog,
     handlePreviewDocument,
     handleUndoConvertedInvoice,
     invoiceGeneratingId,
     isInvoicesSection,
+    isPurchaseOrdersSection,
     isQuotesSection,
     previewingId,
     translate,
@@ -1632,6 +2098,95 @@ function App() {
   const ncfDialogSequenceLength = getNcfSequenceLength(ncfDialog.category, ncfCategories)
   const ncfDialogSuffixPlaceholder = '0'.repeat(ncfDialogSequenceLength)
   const isNcfEditMode = ncfDialog.mode === 'edit'
+
+  // Last NCF used for whichever category is currently selected in the dialog
+  const lastNcfForCurrentCategory = useMemo(() => {
+    if (!ncfDialog.isOpen) return null
+    const regime = fiscalRegimes.find((r) => r.code === ncfDialog.category)
+    return regime?.lastNcfUsed ?? null
+  }, [fiscalRegimes, ncfDialog.isOpen, ncfDialog.category])
+
+  // ── NCF Sequences tab handlers ──────────────────────────────────────────────
+
+  const handleOpenEditSequence = useCallback((regime) => {
+    // Extract the pure numeric part from the next NCF string (e.g. "B02" + "00000046" → 46)
+    const rawSuffix = regime.nextNcf ? regime.nextNcf.slice(regime.code.length) : '1'
+    const nextNumber = parseInt(rawSuffix, 10) || 1
+    setEditSequenceDialog({
+      isOpen: true,
+      categoryCode: regime.code,
+      categoryName: regime.name,
+      inputValue: String(nextNumber),
+      isLoading: false,
+      error: null,
+    })
+  }, [])
+
+  const handleSaveSequence = useCallback(async () => {
+    const nextNumber = parseInt(editSequenceDialog.inputValue, 10)
+    if (Number.isNaN(nextNumber) || nextNumber < 1) {
+      setEditSequenceDialog((current) => ({
+        ...current,
+        error: 'El número debe ser al menos 1.',
+      }))
+      return
+    }
+    setEditSequenceDialog((current) => ({ ...current, isLoading: true, error: null }))
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/Invoices/ncf-sequences/${editSequenceDialog.categoryCode}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nextNumber }),
+        },
+      )
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || body?.title || 'Error al actualizar la secuencia.')
+      }
+      setEditSequenceDialog((current) => ({ ...current, isOpen: false }))
+      await loadFiscalRegimes()
+    } catch (err) {
+      setEditSequenceDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: err.message || 'Error al guardar.',
+      }))
+    }
+  }, [editSequenceDialog.categoryCode, editSequenceDialog.inputValue, loadFiscalRegimes])
+
+  // When the user picks a different category, update the dialog and fetch the
+  // suggested next NCF for that category so the suffix auto-fills.
+  const handleNcfCategoryChange = useCallback(
+    async (newCategory) => {
+      setNcfDialog((current) => {
+        if (!current.isOpen) return current
+        const nextSequenceLength = getNcfSequenceLength(newCategory, ncfCategories)
+        return {
+          ...current,
+          category: newCategory,
+          suffix: current.suffix.slice(0, nextSequenceLength),
+        }
+      })
+
+      if (isNcfEditMode) return
+
+      try {
+        const suggested = await fetchSuggestedNcf(newCategory)
+        setNcfDialog((current) => {
+          if (!current.isOpen || current.category !== newCategory) return current
+          return {
+            ...current,
+            suffix: extractNcfSuffix(suggested.ncfNumber, newCategory),
+          }
+        })
+      } catch {
+        // Ignore — leave suffix as-is if the fetch fails
+      }
+    },
+    [extractNcfSuffix, fetchSuggestedNcf, isNcfEditMode, ncfCategories],
+  )
 
   return (
     <div className="layout">
@@ -1691,6 +2246,62 @@ function App() {
         ))}
       </nav>
 
+      {isNcfSequencesSection ? (
+        <section className="section-content">
+          <div className="section-intro">
+            <h2>Secuencias NCF</h2>
+            <p>Último NCF emitido y próximo a asignar por cada categoría fiscal.</p>
+          </div>
+          <div className="document-table-wrapper">
+            <table className="document-table">
+              <thead>
+                <tr>
+                  <th>Categoría</th>
+                  <th>Nombre</th>
+                  <th style={{ textAlign: 'right' }}>Facturas</th>
+                  <th>Último NCF</th>
+                  <th>Próximo NCF</th>
+                  <th style={{ textAlign: 'right' }}>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fiscalRegimes.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', opacity: 0.6 }}>
+                      Cargando secuencias…
+                    </td>
+                  </tr>
+                ) : (
+                  fiscalRegimes.map((regime) => (
+                    <tr key={regime.code}>
+                      <td>
+                        <code style={{ fontWeight: 600 }}>{regime.code}</code>
+                      </td>
+                      <td>{regime.name}</td>
+                      <td style={{ textAlign: 'right' }}>{regime.invoiceCount ?? 0}</td>
+                      <td>{regime.lastNcfUsed ?? <span style={{ opacity: 0.45 }}>—</span>}</td>
+                      <td>
+                        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{regime.nextNcf}</span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => handleOpenEditSequence(regime)}
+                        >
+                          Editar
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {!isNcfSequencesSection ? (
       <section className="section-content">
         <div className={`section-intro ${isQuotesSection ? 'section-intro--with-action' : ''}`}>
           <div className="section-intro__copy">
@@ -1851,8 +2462,9 @@ function App() {
           />
         )}
       </section>
+      ) : null}
 
-      {!isQuotesSection ? (
+      {!isQuotesSection && !isNcfSequencesSection ? (
         <section className="section-content">
           <div className="section-intro">
             <h2>{formHeading}</h2>
@@ -1865,6 +2477,17 @@ function App() {
               onSubmit={(payload) => handleCreate('receipts', payload)}
               isSubmitting={isSubmitting}
               t={translate}
+            />
+          ) : isPurchaseOrdersSection ? (
+            <PurchaseOrderForm
+              onSubmit={handlePOSubmit}
+              isSubmitting={isSubmitting}
+              t={translate}
+              quotes={documents.quotes}
+              initialPO={editingPO}
+              mode={editingPO ? 'edit' : 'create'}
+              onCancelEdit={handleCancelEditPO}
+              prefillQuoteId={prefillPOQuoteId}
             />
           ) : (
             <div className="quote-cta">
@@ -1906,6 +2529,156 @@ function App() {
           />
         </Modal>
       ) : null}
+      {attachmentsDialog.isOpen ? (
+        <Modal
+          isOpen={attachmentsDialog.isOpen}
+          onClose={attachmentsDialog.isUploading ? undefined : handleCloseAttachmentsDialog}
+          title={translate('purchaseOrderForm.attachmentsHeading')}
+          description={attachmentsDialog.documentNumber || ''}
+          eyebrow={translate('sections.purchaseOrders.title')}
+        >
+          <div className="modal-body">
+            {attachmentsDialog.error ? (
+              <div className="banner banner--error" role="alert">
+                {attachmentsDialog.error}
+              </div>
+            ) : null}
+            {attachmentsDialog.isLoading ? (
+              <p className="muted">{translate('purchaseOrderForm.attachmentsLoading')}</p>
+            ) : attachmentsDialog.attachments.length === 0 ? (
+              <p className="muted">{translate('purchaseOrderForm.attachmentsEmpty')}</p>
+            ) : (
+              <ul className="attachments-list">
+                {attachmentsDialog.attachments.map((attachment) => {
+                  const isDeleting = attachmentsDialog.deletingId === attachment.id
+                  const fileSizeKb = Math.ceil((attachment.fileSize || 0) / 1024)
+                  return (
+                    <li key={attachment.id} className="attachments-list__item">
+                      <span className="attachments-list__name">{attachment.fileName}</span>
+                      <span className="attachments-list__meta">
+                        {fileSizeKb} KB
+                      </span>
+                      <div className="attachments-list__actions">
+                        <button
+                          type="button"
+                          className="button button--secondary button--compact"
+                          onClick={() => handleDownloadAttachment(attachment)}
+                        >
+                          {translate('purchaseOrderForm.attachDownload')}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => handleDeleteAttachment(attachment.id)}
+                          disabled={isDeleting}
+                        >
+                          {isDeleting
+                            ? translate('purchaseOrderForm.attachDeleting')
+                            : translate('purchaseOrderForm.attachDelete')}
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            <div className="attachments-upload">
+              <label className="button button--secondary" style={{ cursor: 'pointer' }}>
+                {attachmentsDialog.isUploading
+                  ? translate('purchaseOrderForm.attachUploading')
+                  : translate('purchaseOrderForm.attachUpload')}
+                <input
+                  type="file"
+                  style={{ display: 'none' }}
+                  disabled={attachmentsDialog.isUploading || attachmentsDialog.isLoading}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      event.target.value = ''
+                      void handleUploadAttachment(file)
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+      {quoteAttachmentsDialog.isOpen ? (
+        <Modal
+          isOpen={quoteAttachmentsDialog.isOpen}
+          onClose={quoteAttachmentsDialog.isUploading ? undefined : handleCloseQuoteAttachmentsDialog}
+          title={translate('quoteAttachments.attachmentsHeading')}
+          description={quoteAttachmentsDialog.documentNumber || ''}
+          eyebrow={translate('sections.quotes.title')}
+        >
+          <div className="modal-body">
+            {quoteAttachmentsDialog.error ? (
+              <div className="banner banner--error" role="alert">
+                {quoteAttachmentsDialog.error}
+              </div>
+            ) : null}
+            {quoteAttachmentsDialog.isLoading ? (
+              <p className="muted">{translate('quoteAttachments.attachmentsLoading')}</p>
+            ) : quoteAttachmentsDialog.attachments.length === 0 ? (
+              <p className="muted">{translate('quoteAttachments.attachmentsEmpty')}</p>
+            ) : (
+              <ul className="attachments-list">
+                {quoteAttachmentsDialog.attachments.map((attachment) => {
+                  const isDeleting = quoteAttachmentsDialog.deletingId === attachment.id
+                  const fileSizeKb = Math.ceil((attachment.fileSize || 0) / 1024)
+                  return (
+                    <li key={attachment.id} className="attachments-list__item">
+                      <span className="attachments-list__name">{attachment.fileName}</span>
+                      <span className="attachments-list__meta">
+                        {fileSizeKb} KB
+                      </span>
+                      <div className="attachments-list__actions">
+                        <button
+                          type="button"
+                          className="button button--secondary button--compact"
+                          onClick={() => handleDownloadQuoteAttachment(attachment)}
+                        >
+                          {translate('quoteAttachments.attachDownload')}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => handleDeleteQuoteAttachment(attachment.id)}
+                          disabled={isDeleting}
+                        >
+                          {isDeleting
+                            ? translate('quoteAttachments.attachDeleting')
+                            : translate('quoteAttachments.attachDelete')}
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            <div className="attachments-upload">
+              <label className="button button--secondary" style={{ cursor: 'pointer' }}>
+                {quoteAttachmentsDialog.isUploading
+                  ? translate('quoteAttachments.attachUploading')
+                  : translate('quoteAttachments.attachUpload')}
+                <input
+                  type="file"
+                  style={{ display: 'none' }}
+                  disabled={quoteAttachmentsDialog.isUploading || quoteAttachmentsDialog.isLoading}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      event.target.value = ''
+                      void handleUploadQuoteAttachment(file)
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
       {ncfDialog.isOpen ? (
         <Modal
           isOpen={ncfDialog.isOpen}
@@ -1937,18 +2710,11 @@ function App() {
               {translate('invoiceForm.ncfCategoryLabel')}
               <select
                 value={ncfDialog.category}
-                onChange={(event) =>
-                  setNcfDialog((current) => {
-                    const nextCategory =
-                      normalizeNcfCategory(event.target.value, ncfCategories) || DEFAULT_NCF_CATEGORY
-                    const nextSequenceLength = getNcfSequenceLength(nextCategory, ncfCategories)
-                    return {
-                      ...current,
-                      category: nextCategory,
-                      suffix: current.suffix.slice(0, nextSequenceLength),
-                    }
-                  })
-                }
+                onChange={(event) => {
+                  const nextCategory =
+                    normalizeNcfCategory(event.target.value, ncfCategories) || DEFAULT_NCF_CATEGORY
+                  void handleNcfCategoryChange(nextCategory)
+                }}
                 disabled={ncfDialog.isLoading || ncfDialog.skipNcf}
               >
                 {ncfCategories.map((option) => (
@@ -1959,6 +2725,11 @@ function App() {
               </select>
             </label>
             <p className="input-hint">{translate('invoiceForm.ncfCategoryHint')}</p>
+            {lastNcfForCurrentCategory ? (
+              <p className="input-hint input-hint--accent">
+                Último usado: <strong>{lastNcfForCurrentCategory}</strong>
+              </p>
+            ) : null}
             <label className="modal-input" aria-disabled={ncfDialog.skipNcf || undefined}>
               {translate('documentList.ncfLabel')}
               <div className="ncf-input-group">
@@ -2000,6 +2771,62 @@ function App() {
                 {ncfDialog.isLoading
                   ? translate(isNcfEditMode ? 'documentList.editingNcf' : 'documentList.generatingInvoice')
                   : translate(isNcfEditMode ? 'pdf.ncfDialogConfirmEdit' : 'pdf.ncfDialogConfirm')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {editSequenceDialog.isOpen ? (
+        <Modal
+          isOpen={editSequenceDialog.isOpen}
+          onClose={() => setEditSequenceDialog((current) => ({ ...current, isOpen: false }))}
+          title="Editar secuencia NCF"
+          description={`Categoría ${editSequenceDialog.categoryCode} — ${editSequenceDialog.categoryName}`}
+          eyebrow="Secuencias NCF"
+        >
+          <div className="form-fields">
+            <label className="modal-input">
+              Próximo número a asignar
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={editSequenceDialog.inputValue}
+                onChange={(event) =>
+                  setEditSequenceDialog((current) => ({
+                    ...current,
+                    inputValue: event.target.value,
+                    error: null,
+                  }))
+                }
+                disabled={editSequenceDialog.isLoading}
+                autoFocus
+              />
+            </label>
+            <p className="input-hint">
+              El próximo NCF generado automáticamente para <strong>{editSequenceDialog.categoryCode}</strong> usará
+              este número como punto de partida.
+            </p>
+            {editSequenceDialog.error ? (
+              <p className="input-hint input-hint--error">{editSequenceDialog.error}</p>
+            ) : null}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => setEditSequenceDialog((current) => ({ ...current, isOpen: false }))}
+                disabled={editSequenceDialog.isLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleSaveSequence}
+                disabled={editSequenceDialog.isLoading || !editSequenceDialog.inputValue.trim()}
+              >
+                {editSequenceDialog.isLoading ? 'Guardando…' : 'Guardar'}
               </button>
             </div>
           </div>

@@ -35,7 +35,31 @@ public class QuotesController : ControllerBase
 
     [HttpGet]
     public ActionResult<IReadOnlyCollection<Quote>> GetQuotes()
-        => Ok(_repository.GetAll());
+    {
+        var quotes = _repository.GetAll().ToList();
+
+        if (quotes.Count > 0)
+        {
+            var quoteIds = quotes.Select(q => q.Id).ToList();
+
+            var expensesByQuote = _context.PurchaseOrders
+                .Where(po => po.QuoteId.HasValue && quoteIds.Contains(po.QuoteId.Value))
+                .GroupBy(po => po.QuoteId!.Value)
+                .Select(g => new { QuoteId = g.Key, Total = g.Sum(po => po.TotalAmount), Count = g.Count() })
+                .ToDictionary(x => x.QuoteId, x => x);
+
+            foreach (var quote in quotes)
+            {
+                if (expensesByQuote.TryGetValue(quote.Id, out var exp))
+                {
+                    quote.TotalExpenses = exp.Total;
+                    quote.ExpenseCount = exp.Count;
+                }
+            }
+        }
+
+        return Ok(quotes);
+    }
 
     [HttpGet("{id:guid}")]
     public ActionResult<Quote> GetQuote(Guid id)
@@ -71,7 +95,7 @@ public class QuotesController : ControllerBase
         quote.CustomerContact = customer.Contact;
 
         var savedQuote = _repository.Add(quote);
-        var pdfBytes = _pdfService.GenerateQuotePdf(ToQuotePdfModel(savedQuote));
+        var pdfBytes = _pdfService.GenerateQuotePdf(ToQuotePdfModel(savedQuote), savedQuote.Comments);
         var response = new QuoteCreateResponse(
             savedQuote,
             $"Quote-{savedQuote.Number}.pdf",
@@ -103,6 +127,12 @@ public class QuotesController : ControllerBase
         quote.CurrencyCode = request.CurrencyCode;
         quote.CultureName = request.Locale;
         quote.ItbisRate = request.ItbisRate;
+        quote.CustomerPONumber = string.IsNullOrWhiteSpace(request.CustomerPONumber)
+            ? null
+            : request.CustomerPONumber.Trim();
+        quote.Comments = string.IsNullOrWhiteSpace(request.Comments)
+            ? null
+            : request.Comments.Trim();
 
         if (!TryResolveCustomerRecord(
                 quote.CustomerName,
@@ -158,6 +188,7 @@ public class QuotesController : ControllerBase
             CurrencyCode = source.CurrencyCode,
             CultureName = source.CultureName,
             ItbisRate = source.ItbisRate,
+            Comments = source.Comments,
             ConvertedInvoiceId = null,
             ConvertedAt = null,
             Lines = source.Lines.Select(line => new DocumentLine
@@ -185,7 +216,7 @@ public class QuotesController : ControllerBase
             return NotFound();
         }
 
-        var pdfBytes = _pdfService.GenerateQuotePdf(ToQuotePdfModel(quote));
+        var pdfBytes = _pdfService.GenerateQuotePdf(ToQuotePdfModel(quote), quote.Comments);
         return File(pdfBytes, "application/pdf", $"Quote-{quote.Number}.pdf");
     }
 
@@ -323,6 +354,118 @@ public class QuotesController : ControllerBase
         _context.SaveChanges();
 
         return Ok(quote);
+    }
+
+    // ── Attachments (customer PO documents) ──────────────────────────────────
+
+    private const long MaxAttachmentBytes = 20 * 1024 * 1024; // 20 MB
+
+    [HttpGet("{id:guid}/attachments")]
+    public ActionResult<IReadOnlyCollection<object>> GetAttachments(Guid id)
+    {
+        if (!_context.Quotes.Any(q => q.Id == id))
+        {
+            return NotFound();
+        }
+
+        var attachments = _context.QuoteAttachments
+            .Where(a => a.QuoteId == id)
+            .OrderBy(a => a.UploadedAt)
+            .Select(a => new
+            {
+                a.Id,
+                a.FileName,
+                a.ContentType,
+                a.FileSize,
+                a.UploadedAt,
+            })
+            .ToList<object>();
+
+        return Ok(attachments);
+    }
+
+    [HttpPost("{id:guid}/attachments")]
+    [RequestSizeLimit(MaxAttachmentBytes + 1024)]
+    public async Task<ActionResult> UploadAttachment(Guid id, IFormFile file)
+    {
+        if (!_context.Quotes.Any(q => q.Id == id))
+        {
+            return NotFound();
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "No file provided",
+                Detail = "Please attach a file to upload.",
+            });
+        }
+
+        if (file.Length > MaxAttachmentBytes)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "File too large",
+                Detail = $"Attachments must be smaller than {MaxAttachmentBytes / (1024 * 1024)} MB.",
+            });
+        }
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+
+        var attachment = new QuoteAttachment
+        {
+            QuoteId = id,
+            FileName = Path.GetFileName(file.FileName),
+            ContentType = file.ContentType ?? "application/octet-stream",
+            FileSize = file.Length,
+            FileData = ms.ToArray(),
+            UploadedAt = DateTime.UtcNow,
+        };
+
+        _context.QuoteAttachments.Add(attachment);
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            attachment.Id,
+            attachment.FileName,
+            attachment.ContentType,
+            attachment.FileSize,
+            attachment.UploadedAt,
+        });
+    }
+
+    [HttpGet("{id:guid}/attachments/{attachmentId:int}/download")]
+    public ActionResult DownloadAttachment(Guid id, int attachmentId)
+    {
+        var attachment = _context.QuoteAttachments
+            .FirstOrDefault(a => a.QuoteId == id && a.Id == attachmentId);
+
+        if (attachment is null)
+        {
+            return NotFound();
+        }
+
+        return File(attachment.FileData, attachment.ContentType, attachment.FileName);
+    }
+
+    [HttpDelete("{id:guid}/attachments/{attachmentId:int}")]
+    public ActionResult DeleteAttachment(Guid id, int attachmentId)
+    {
+        var attachment = _context.QuoteAttachments
+            .FirstOrDefault(a => a.QuoteId == id && a.Id == attachmentId);
+
+        if (attachment is null)
+        {
+            return NotFound();
+        }
+
+        _context.QuoteAttachments.Remove(attachment);
+        _context.SaveChanges();
+
+        return NoContent();
     }
 
     private Quote? GetQuoteWithLines(Guid id) =>

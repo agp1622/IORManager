@@ -15,6 +15,15 @@ public record PurchaseOrderCreateRequest
     [Required]
     public string SupplierName { get; init; } = string.Empty;
 
+    /// <summary>Optional: the quote this expense belongs to (for project cost tracking).</summary>
+    public Guid? QuoteId { get; init; }
+
+    [MaxLength(4000)]
+    public string? InvestmentNotes { get; init; }
+
+    [MaxLength(3)]
+    public string CurrencyCode { get; init; } = "USD";
+
     [MinLength(1)]
     public IReadOnlyList<PurchaseOrderLineRequest> Lines { get; init; } = Array.Empty<PurchaseOrderLineRequest>();
 
@@ -26,7 +35,9 @@ public record PurchaseOrderCreateRequest
             Number = PurchaseOrderNumber,
             Date = PurchaseOrderDate,
             SupplierName = SupplierName,
-            CurrencyCode = "USD",
+            QuoteId = QuoteId,
+            InvestmentNotes = string.IsNullOrWhiteSpace(InvestmentNotes) ? null : InvestmentNotes.Trim(),
+            CurrencyCode = string.IsNullOrWhiteSpace(CurrencyCode) ? "USD" : CurrencyCode.Trim().ToUpperInvariant(),
             CultureName = "en-US",
             Lines = Lines.Select(line => line.ToDocumentLine()).ToList()
         };
@@ -34,6 +45,26 @@ public record PurchaseOrderCreateRequest
         purchaseOrder.RecalculateTotal();
         return purchaseOrder;
     }
+}
+
+public record PurchaseOrderUpdateRequest
+{
+    [Required]
+    public string SupplierName { get; init; } = string.Empty;
+
+    public DateOnly PurchaseOrderDate { get; init; }
+        = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    public Guid? QuoteId { get; init; }
+
+    [MaxLength(4000)]
+    public string? InvestmentNotes { get; init; }
+
+    [MaxLength(3)]
+    public string CurrencyCode { get; init; } = "USD";
+
+    [MinLength(1)]
+    public IReadOnlyList<PurchaseOrderLineRequest> Lines { get; init; } = Array.Empty<PurchaseOrderLineRequest>();
 }
 
 public record PurchaseOrderLineRequest

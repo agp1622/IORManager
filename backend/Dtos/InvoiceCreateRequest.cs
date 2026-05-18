@@ -37,6 +37,12 @@ public record InvoiceCreateRequest
     [Range(typeof(decimal), "0.0", "1.0")]
     public decimal? ItbisRate { get; init; }
 
+    [MaxLength(100)]
+    public string? CustomerPONumber { get; init; }
+
+    [MaxLength(2000)]
+    public string? Comments { get; init; }
+
     public Quote ToQuote()
     {
         var quote = new Quote
@@ -49,7 +55,9 @@ public record InvoiceCreateRequest
             CurrencyCode = CurrencyCode,
             CultureName = Locale,
             Lines = Lines.Select(line => line.ToDocumentLine()).ToList(),
-            ItbisRate = ItbisRate
+            ItbisRate = ItbisRate,
+            CustomerPONumber = string.IsNullOrWhiteSpace(CustomerPONumber) ? null : CustomerPONumber.Trim(),
+            Comments = string.IsNullOrWhiteSpace(Comments) ? null : Comments.Trim()
         };
 
         quote.RecalculateTotal();
@@ -139,4 +147,10 @@ public record InvoiceUpdateRequest
     [Range(typeof(decimal), "0.0", "1.0")]
     public decimal? ItbisRate { get; init; }
         = null;
+
+    [MaxLength(100)]
+    public string? CustomerPONumber { get; init; }
+
+    [MaxLength(2000)]
+    public string? Comments { get; init; }
 }

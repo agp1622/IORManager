@@ -4,7 +4,7 @@ namespace IORManager.Services;
 
 public interface IFinancialDocumentPdfService
 {
-    byte[] GenerateQuotePdf(Invoice invoice);
+    byte[] GenerateQuotePdf(Invoice invoice, string? comments = null);
 
     byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null);
 
