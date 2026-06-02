@@ -28,7 +28,30 @@ public class Program
         {
             options.AddPolicy(corsPolicyName, policy =>
             {
-                policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                // Allow both dev (Vite on 5173) and IIS-deployed frontend
+              var origins = new[]
+                    {
+                        "http://localhost:5173",
+                        "http://127.0.0.1:5173",
+                        "http://localhost",
+                        "http://127.0.0.1",
+                        "https://localhost",
+                        "https://127.0.0.1",
+                        "http://localhost:3001",
+                        "https://localhost:3001",
+                        "https://papavelagtechnology.com",
+                        "https://www.papavelagtechnology.com"
+                    };
+                
+                // Add machine hostname if available
+                try
+                {
+                    var hostname = System.Net.Dns.GetHostName();
+                    origins = origins.Concat(new[] { $"http://{hostname}", $"https://{hostname}" }).ToArray();
+                }
+                catch { }
+
+                policy.WithOrigins(origins)
                     .AllowAnyHeader()
                     .AllowAnyMethod();
             });
@@ -72,8 +95,6 @@ public class Program
             app.UseSwagger();
             app.UseSwaggerUI();
         }
-
-        app.UseHttpsRedirection();
 
         app.UseCors(corsPolicyName);
 
