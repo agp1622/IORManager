@@ -65,6 +65,27 @@ public class NcfNumberGenerator : INcfNumberGenerator
         return sequence;
     }
 
+    public void SetNextNumber(string categoryCode, long nextNumber)
+    {
+        if (nextNumber < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nextNumber), "Next number must be at least 1.");
+        }
+
+        var normalizedCategory = NcfCategoryCatalog.NormalizeCategoryCode(categoryCode);
+        var strategy = _context.Database.CreateExecutionStrategy();
+        strategy.Execute(() =>
+        {
+            using var transaction = _context.Database.BeginTransaction(IsolationLevel.Serializable);
+
+            var sequence = GetOrCreateSequence(normalizedCategory);
+            sequence.NextNumber = nextNumber;
+            _context.SaveChanges();
+
+            transaction.Commit();
+        });
+    }
+
     private string GetNextFormattedNumber(
         NcfSequence sequence,
         string categoryCode,

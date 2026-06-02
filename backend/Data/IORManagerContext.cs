@@ -22,6 +22,9 @@ public class IORManagerContext : DbContext
     public DbSet<ReceiptPayment> ReceiptPayments => Set<ReceiptPayment>();
     public DbSet<InvoiceNumberSequence> InvoiceNumberSequences => Set<InvoiceNumberSequence>();
     public DbSet<NcfSequence> NcfSequences => Set<NcfSequence>();
+    public DbSet<FiscalRegime> FiscalRegimes => Set<FiscalRegime>();
+    public DbSet<PurchaseOrderAttachment> PurchaseOrderAttachments => Set<PurchaseOrderAttachment>();
+    public DbSet<QuoteAttachment> QuoteAttachments => Set<QuoteAttachment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +38,10 @@ public class IORManagerContext : DbContext
         ConfigureReceipts(modelBuilder);
         ConfigureInvoiceNumberSequence(modelBuilder);
         ConfigureNcfSequence(modelBuilder);
+        ConfigureFiscalRegime(modelBuilder);
+        ConfigurePurchaseOrderAttachment(modelBuilder);
+        ConfigureQuoteAttachment(modelBuilder);
+        ConfigurePurchaseOrderQuoteLink(modelBuilder);
     }
 
     private static void ConfigureFinancialDocuments(ModelBuilder modelBuilder)
@@ -189,6 +196,82 @@ public class IORManagerContext : DbContext
                 CategoryCode = NcfCategoryCatalog.DefaultCategoryCode,
                 NextNumber = 1
             });
+        });
+    }
+
+    private static void ConfigurePurchaseOrderAttachment(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PurchaseOrderAttachment>(builder =>
+        {
+            builder.HasKey(a => a.Id);
+            builder.Property(a => a.FileName).HasMaxLength(255).IsRequired();
+            builder.Property(a => a.ContentType).HasMaxLength(100).IsRequired();
+            builder.Property(a => a.FileData).HasColumnType("varbinary(max)").IsRequired();
+
+            builder.HasOne(a => a.PurchaseOrder)
+                .WithMany(po => po.Attachments)
+                .HasForeignKey(a => a.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureQuoteAttachment(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<QuoteAttachment>(builder =>
+        {
+            builder.HasKey(a => a.Id);
+            builder.Property(a => a.FileName).HasMaxLength(255).IsRequired();
+            builder.Property(a => a.ContentType).HasMaxLength(100).IsRequired();
+            builder.Property(a => a.FileData).HasColumnType("varbinary(max)").IsRequired();
+
+            builder.HasOne(a => a.Quote)
+                .WithMany(q => q.Attachments)
+                .HasForeignKey(a => a.QuoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigurePurchaseOrderQuoteLink(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PurchaseOrder>(builder =>
+        {
+            builder.Property(po => po.QuoteId).IsRequired(false);
+
+            // Prevent multiple cascade paths on FinancialDocument (self-referential FK).
+            builder.HasOne(po => po.Quote)
+                .WithMany()
+                .HasForeignKey(po => po.QuoteId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+    }
+
+    private static void ConfigureFiscalRegime(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FiscalRegime>(builder =>
+        {
+            builder.HasKey(r => r.Id);
+            builder.Property(r => r.Id).ValueGeneratedNever();
+            builder.Property(r => r.Code).HasMaxLength(10).IsRequired();
+            builder.Property(r => r.Name).HasMaxLength(200).IsRequired();
+            builder.HasIndex(r => r.Code).IsUnique();
+
+            builder.HasMany(r => r.Invoices)
+                .WithOne(i => i.FiscalRegime)
+                .HasForeignKey(i => i.FiscalRegimeId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Seed all DR NCF fiscal regimes derived from the catalog
+            var seedData = NcfCategoryCatalog.GetAll()
+                .Select((definition, index) => new FiscalRegime
+                {
+                    Id = index + 1,
+                    Code = definition.Code,
+                    Name = definition.Name,
+                    InvoiceCount = 0
+                })
+                .ToArray();
+
+            builder.HasData(seedData);
         });
     }
 }

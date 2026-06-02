@@ -48,7 +48,9 @@ const InvoiceForm = ({
   const [customerAddress, setCustomerAddress] = useState('')
   const [customerContact, setCustomerContact] = useState('')
   const [currencyCode, setCurrencyCode] = useState(defaultCurrency)
+  const [customerPONumber, setCustomerPONumber] = useState('')
   const [itbisRate, setItbisRate] = useState('')
+  const [comments, setComments] = useState('')
   const [lines, setLines] = useState([createEmptyLine()])
   const isEditMode = mode === 'edit' && initialInvoice
   const customerListId = `${formInstanceId}-customers`
@@ -91,6 +93,8 @@ const InvoiceForm = ({
       setCustomerAddress(initialInvoice.customerAddress || '')
       setCustomerContact(initialInvoice.customerContact || '')
       setCurrencyCode(initialInvoice.currencyCode || defaultCurrency)
+      setCustomerPONumber(initialInvoice.customerPONumber || '')
+      setComments(initialInvoice.comments || '')
       setItbisRate(
         typeof initialInvoice.itbisRate === 'number'
           ? (Number(initialInvoice.itbisRate) * 100).toString()
@@ -116,6 +120,8 @@ const InvoiceForm = ({
     setCustomerAddress('')
     setCustomerContact('')
     setCurrencyCode(defaultCurrency)
+    setCustomerPONumber('')
+    setComments('')
     setItbisRate('')
     setLines([createEmptyLine()])
   }, [initialInvoice, defaultCurrency, today])
@@ -181,6 +187,8 @@ const InvoiceForm = ({
       customerAddress: normalizedAddress,
       customerContact: normalizedContact,
       currencyCode,
+      customerPONumber: customerPONumber.trim() || null,
+      comments: comments.trim() || null,
       locale: initialInvoice?.cultureName || locale,
       itbisRate: normalizedItbisRate,
       lines: lines.map((line) => ({
@@ -199,6 +207,8 @@ const InvoiceForm = ({
       setCustomerAddress('')
       setCustomerContact('')
       setCurrencyCode(defaultCurrency)
+      setCustomerPONumber('')
+      setComments('')
       setItbisRate('')
       setLines([createEmptyLine()])
     }
@@ -290,6 +300,28 @@ const InvoiceForm = ({
             placeholder={t('invoiceForm.itbisPlaceholder')}
           />
           <p className="input-hint">{t('invoiceForm.itbisHint')}</p>
+        </label>
+        <label>
+          {t('quoteAttachments.customerPONumberLabel')}
+          <input
+            type="text"
+            value={customerPONumber}
+            onChange={(event) => setCustomerPONumber(event.target.value)}
+            placeholder={t('quoteAttachments.customerPONumberPlaceholder')}
+            maxLength={100}
+          />
+          <p className="input-hint">{t('quoteAttachments.customerPONumberHint')}</p>
+        </label>
+        <label className="field-grid__full">
+          {t('invoiceForm.commentsLabel')}
+          <textarea
+            value={comments}
+            onChange={(event) => setComments(event.target.value)}
+            placeholder={t('invoiceForm.commentsPlaceholder')}
+            rows="4"
+            maxLength={2000}
+          />
+          <p className="input-hint">{t('invoiceForm.commentsHint')}</p>
         </label>
       </div>
 

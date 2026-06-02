@@ -51,8 +51,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
-    public byte[] GenerateQuotePdf(Invoice invoice) =>
-        GenerateInvoiceDocument(invoice, isQuote: true, ncfNumber: null);
+    public byte[] GenerateQuotePdf(Invoice invoice, string? comments = null) =>
+        GenerateInvoiceDocument(invoice, isQuote: true, ncfNumber: null, comments: comments);
 
     public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) =>
         GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber);
@@ -127,7 +127,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         return ms.ToArray();
     }
 
-    private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote, string? ncfNumber)
+    private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote, string? ncfNumber, string? comments = null)
     {
         var resources = GetInvoiceResources(invoice.CultureName, isQuote);
         var culture = resources.Culture;
@@ -191,7 +191,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             totals: totals,
             footerNotes: GetFooterNotes(culture),
             culture: culture,
-            ncfNumber: invoiceNcf);
+            ncfNumber: invoiceNcf,
+            comments: isQuote ? comments : null);
     }
 
     public byte[] GenerateReceiptPdf(Receipt receipt)
@@ -277,7 +278,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         IReadOnlyCollection<(string Label, string Value)> totals,
         IReadOnlyCollection<string> footerNotes,
         CultureInfo culture,
-        string? ncfNumber = null)
+        string? ncfNumber = null,
+        string? comments = null)
     {
         metadata ??= Array.Empty<(string, string)>();
         totals ??= Array.Empty<(string, string)>();
@@ -306,6 +308,11 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                     if (totals.Count > 0)
                     {
                         column.Item().Element(totalContainer => ComposeTotals(totalContainer, totals));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(comments))
+                    {
+                        column.Item().Element(c => ComposeComments(c, comments, culture));
                     }
 
                 });
@@ -444,6 +451,22 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 table.Cell().Element(t => t.PaddingVertical(4).PaddingHorizontal(12)).AlignRight().Text(entry.Value).SemiBold();
             }
         });
+    }
+
+    private static void ComposeComments(IContainer container, string comments, CultureInfo culture)
+    {
+        var label = IsSpanishCulture(culture) ? "Comentarios" : "Comments";
+        container
+            .Background(CardBackgroundColor)
+            .Border(1)
+            .BorderColor(CardBorderColor)
+            .Padding(16)
+            .Column(column =>
+            {
+                column.Spacing(6);
+                column.Item().Text(label).SemiBold().FontSize(11).FontColor(SecondaryTextColor);
+                column.Item().Text(comments).FontSize(10.5f).FontColor(PrimaryTextColor);
+            });
     }
 
     private static void ComposeFooterNotes(

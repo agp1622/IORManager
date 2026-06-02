@@ -68,6 +68,38 @@ public class InvoicesController : ControllerBase
         return Ok(categories);
     }
 
+    [HttpGet("fiscal-regimes")]
+    public ActionResult<IReadOnlyCollection<FiscalRegimeResponse>> GetFiscalRegimes()
+    {
+        var regimes = _context.FiscalRegimes
+            .OrderBy(r => r.Id)
+            .ToList();
+
+        var responses = regimes.Select(regime =>
+        {
+            // Last NCF used: latest NcfNumber in this category across ALL invoices
+            // (uses NcfCategory so pre-existing invoices without FiscalRegimeId are included)
+            var lastNcf = _context.Invoices
+                .Where(i => i.NcfCategory == regime.Code && i.NcfNumber != null)
+                .OrderByDescending(i => i.NcfNumber)
+                .Select(i => i.NcfNumber)
+                .FirstOrDefault();
+
+            // Next NCF: peek without advancing the sequence
+            var nextNcf = _ncfNumberGenerator.PeekNextNumber(regime.Code);
+
+            return new FiscalRegimeResponse(
+                regime.Id,
+                regime.Code,
+                regime.Name,
+                regime.InvoiceCount,
+                lastNcf,
+                nextNcf);
+        }).ToList();
+
+        return Ok(responses);
+    }
+
     [HttpGet("next-ncf")]
     public ActionResult<NcfAssignmentResponse> GetNextNcf([FromQuery] string? ncfCategory)
     {
@@ -79,6 +111,39 @@ public class InvoicesController : ControllerBase
         normalizedCategory ??= NcfCategoryCatalog.DefaultCategoryCode;
         var nextNumber = _ncfNumberGenerator.PeekNextNumber(normalizedCategory);
         return Ok(new NcfAssignmentResponse(nextNumber, normalizedCategory));
+    }
+
+    [HttpPut("ncf-sequences/{categoryCode}")]
+    public ActionResult SetNcfSequence(string categoryCode, [FromBody] NcfSequenceSetRequest request)
+    {
+        if (!NcfCategoryCatalog.TryGetByCode(categoryCode, out _))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid NCF category",
+                Detail = $"The NCF category \"{categoryCode}\" is not supported.",
+            });
+        }
+
+        if (request.NextNumber < 1)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid next number",
+                Detail = "The next number must be at least 1.",
+            });
+        }
+
+        try
+        {
+            _ncfNumberGenerator.SetNextNumber(categoryCode, request.NextNumber);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new ProblemDetails { Title = "Invalid request", Detail = ex.Message });
+        }
+
+        return NoContent();
     }
 
     [HttpPost]
@@ -402,6 +467,21 @@ public class InvoicesController : ControllerBase
         }
 
         invoice.InvoiceGeneratedAt ??= DateTime.UtcNow;
+
+        // Link invoice to its fiscal regime and bump the count (only on first assignment)
+        if (!invoice.FiscalRegimeId.HasValue && !string.IsNullOrWhiteSpace(normalizedCategory))
+        {
+            var categoryCode = normalizedCategory; // copy out-param so it's usable inside the lambda
+            var regime = _context.FiscalRegimes
+                .FirstOrDefault(r => r.Code == categoryCode);
+
+            if (regime is not null)
+            {
+                invoice.FiscalRegimeId = regime.Id;
+                regime.InvoiceCount++;
+            }
+        }
+
         _context.SaveChanges();
         normalizedNcf = invoice.NcfNumber;
         errorResult = null;
