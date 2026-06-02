@@ -25,6 +25,8 @@ public class IORManagerContext : DbContext
     public DbSet<FiscalRegime> FiscalRegimes => Set<FiscalRegime>();
     public DbSet<PurchaseOrderAttachment> PurchaseOrderAttachments => Set<PurchaseOrderAttachment>();
     public DbSet<QuoteAttachment> QuoteAttachments => Set<QuoteAttachment>();
+    public DbSet<AccountPayable> AccountsPayable => Set<AccountPayable>();
+    public DbSet<User> Users => Set<User>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -42,6 +44,16 @@ public class IORManagerContext : DbContext
         ConfigurePurchaseOrderAttachment(modelBuilder);
         ConfigureQuoteAttachment(modelBuilder);
         ConfigurePurchaseOrderQuoteLink(modelBuilder);
+        ConfigureAccountPayable(modelBuilder);
+        ConfigureUsers(modelBuilder);
+    }
+
+    private static void ConfigureUsers(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<User>(b =>
+        {
+            b.HasIndex(u => u.Email).IsUnique();
+        });
     }
 
     private static void ConfigureFinancialDocuments(ModelBuilder modelBuilder)
@@ -61,7 +73,8 @@ public class IORManagerContext : DbContext
                 .HasValue<Quote>("Quote")
                 .HasValue<Invoice>("Invoice")
                 .HasValue<PurchaseOrder>("PurchaseOrder")
-                .HasValue<Receipt>("Receipt");
+                .HasValue<Receipt>("Receipt")
+                .HasValue<AccountPayable>("AccountPayable");
 
             builder.HasIndex(document => document.Number)
                 .IsUnique();
@@ -272,6 +285,48 @@ public class IORManagerContext : DbContext
                 .ToArray();
 
             builder.HasData(seedData);
+        });
+    }
+
+    private static void ConfigureAccountPayable(ModelBuilder modelBuilder)
+    {
+        var dueDateConverter = new ValueConverter<DateOnly, DateTime>(
+            dateOnly => dateOnly.ToDateTime(TimeOnly.MinValue),
+            dateTime => DateOnly.FromDateTime(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)));
+
+        var dueDateComparer = new ValueComparer<DateOnly>(
+            (left, right) => left == right,
+            dateOnly => dateOnly.GetHashCode(),
+            dateOnly => dateOnly);
+
+        modelBuilder.Entity<AccountPayable>(builder =>
+        {
+            builder.Property(ap => ap.DueDate)
+                .HasConversion(dueDateConverter)
+                .Metadata.SetValueComparer(dueDateComparer);
+
+            builder.Property(ap => ap.Status)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            builder.Property(ap => ap.CustomerPO)
+                .HasMaxLength(100);
+
+            builder.Property(ap => ap.Notes)
+                .HasMaxLength(1000);
+
+            builder.Property(ap => ap.InvoiceId)
+                .IsRequired(false);
+
+            // Prevent multiple cascade paths through FinancialDocument TPH table.
+            builder.HasOne(ap => ap.Invoice)
+                .WithMany()
+                .HasForeignKey(ap => ap.InvoiceId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            builder.HasIndex(ap => ap.InvoiceId)
+                .IsUnique()
+                .HasFilter("[InvoiceId] IS NOT NULL");
         });
     }
 }

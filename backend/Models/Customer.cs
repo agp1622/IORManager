@@ -19,6 +19,12 @@ public class Customer
     [MaxLength(150)]
     public string Contact { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Default number of days from invoice date until payment is due.
+    /// Used when automatically creating an AccountPayable upon NCF assignment.
+    /// </summary>
+    public int DefaultPaymentTermsDays { get; set; } = 30;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

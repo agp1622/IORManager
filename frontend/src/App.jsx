@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAuth, apiFetch } from './contexts/AuthContext'
 import InvoiceForm from './components/InvoiceForm'
 import ReceiptForm from './components/ReceiptForm'
 import PurchaseOrderForm from './components/PurchaseOrderForm'
+import AccountPayableForm from './components/AccountPayableForm'
 import Modal from './components/Modal'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
@@ -23,6 +25,7 @@ const BRAND_NOTES = {
   invoices: 'Facturas fiscales listas para control, descarga y seguimiento.',
   receipts: 'Recibos elegantes que transmiten confianza y precisión.',
   purchaseOrders: 'Órdenes de compra con trazabilidad y documentación completa.',
+  accountsPayable: 'Control de facturas a proveedores pendientes de pago.',
   default: 'Documentos oficiales con el sello PAPAVELAG.',
 }
 
@@ -132,6 +135,20 @@ const createSectionConfig = (t) => ({
     createSuccess: t('sections.purchaseOrders.createSuccess'),
     createError: t('sections.purchaseOrders.createError'),
   },
+  accountsPayable: {
+    title: t('sections.accountsPayable.title'),
+    description: t('sections.accountsPayable.description'),
+    endpoint: 'AccountsPayable',
+    singular: t('sections.accountsPayable.singular'),
+    partyLabel: t('sections.accountsPayable.partyLabel'),
+    loading: t('sections.accountsPayable.loading'),
+    empty: t('sections.accountsPayable.empty'),
+    loadError: t('sections.accountsPayable.loadError'),
+    createHeading: t('sections.accountsPayable.createHeading'),
+    createDescription: t('sections.accountsPayable.createDescription'),
+    createSuccess: t('sections.accountsPayable.createSuccess'),
+    createError: t('sections.accountsPayable.createError'),
+  },
   ncfSequences: {
     title: 'Secuencias NCF',
     // No endpoint — data comes from fiscalRegimes loaded separately
@@ -153,6 +170,7 @@ const DocumentList = ({
 }) => {
   const isQuoteList = config?.endpoint === 'Quotes'
   const isInvoiceList = config?.endpoint === 'Invoices'
+  const isAccountsPayableList = config?.endpoint === 'AccountsPayable'
   const [openActionsId, setOpenActionsId] = useState(null)
 
   useEffect(() => {
@@ -230,6 +248,11 @@ const DocumentList = ({
                 {renderSortButton(t('documentList.quoteNumber'), 'quoteNumber')}
               </th>
             ) : null}
+            {isAccountsPayableList ? (
+              <th scope="col" aria-sort={getAriaSort('invoiceNumber')}>
+                {renderSortButton(t('documentList.invoiceNumber'), 'invoiceNumber')}
+              </th>
+            ) : null}
             <th scope="col" aria-sort={getAriaSort('date')}>
               {renderSortButton(t('documentList.date'), 'date')}
             </th>
@@ -245,9 +268,21 @@ const DocumentList = ({
             <th scope="col" aria-sort={getAriaSort('currency')}>
               {renderSortButton(t('documentList.currency'), 'currency')}
             </th>
-            <th scope="col" aria-sort={getAriaSort('ncf')}>
-              {renderSortButton(t('documentList.ncfLabel'), 'ncf')}
-            </th>
+            {!isAccountsPayableList ? (
+              <th scope="col" aria-sort={getAriaSort('ncf')}>
+                {renderSortButton(t('documentList.ncfLabel'), 'ncf')}
+              </th>
+            ) : null}
+            {isAccountsPayableList ? (
+              <th scope="col" aria-sort={getAriaSort('dueDate')}>
+                {renderSortButton(t('documentList.dueDate'), 'dueDate')}
+              </th>
+            ) : null}
+            {isAccountsPayableList ? (
+              <th scope="col" aria-sort={getAriaSort('status')}>
+                {renderSortButton(t('documentList.status'), 'status')}
+              </th>
+            ) : null}
             <th scope="col">{t('documentList.actions')}</th>
           </tr>
         </thead>
@@ -288,6 +323,11 @@ const DocumentList = ({
                     {quoteNumber}
                   </td>
                 ) : null}
+                {isAccountsPayableList ? (
+                  <td data-heading={t('documentList.invoiceNumber')}>
+                    {document.invoice?.number || '—'}
+                  </td>
+                ) : null}
                 <td data-heading={t('documentList.date')}>
                   {formatDate(document.date, cultureName)}
                 </td>
@@ -320,9 +360,27 @@ const DocumentList = ({
                 <td data-heading={t('documentList.currency')}>
                   {currencyCode || '—'}
                 </td>
-                <td data-heading={t('documentList.ncfLabel')}>
-                  {ncfNumber || '—'}
-                </td>
+                {!isAccountsPayableList ? (
+                  <td data-heading={t('documentList.ncfLabel')}>
+                    {ncfNumber || '—'}
+                  </td>
+                ) : null}
+                {isAccountsPayableList ? (
+                  <td data-heading={t('documentList.dueDate')}>
+                    {formatDate(document.dueDate, cultureName)}
+                  </td>
+                ) : null}
+                {isAccountsPayableList ? (
+                  <td data-heading={t('documentList.status')}>
+                    <span className={`pill ${
+                      document.status === 'Pagado' ? 'pill--success' :
+                      document.status === 'Vencido' ? 'pill--error' :
+                      'pill--warning'
+                    }`}>
+                      {document.status || '—'}
+                    </span>
+                  </td>
+                ) : null}
                 <td data-heading={t('documentList.actions')} className="document-table__actions">
                   <button
                     type="button"
@@ -436,6 +494,7 @@ function App() {
     invoices: [],
     receipts: [],
     purchaseOrders: [],
+    accountsPayable: [],
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -455,7 +514,8 @@ function App() {
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
   const [editingPO, setEditingPO] = useState(null)
   const [prefillPOQuoteId, setPrefillPOQuoteId] = useState(null)
-  const [pageBySection, setPageBySection] = useState({ quotes: 1, invoices: 1, receipts: 1, purchaseOrders: 1 })
+  const [editingAP, setEditingAP] = useState(null)
+  const [pageBySection, setPageBySection] = useState({ quotes: 1, invoices: 1, receipts: 1, purchaseOrders: 1, accountsPayable: 1 })
   const [attachmentsDialog, setAttachmentsDialog] = useState({
     isOpen: false,
     documentId: null,
@@ -497,6 +557,23 @@ function App() {
     isLoading: false,
     error: null,
   })
+  const [paymentTermsDialog, setPaymentTermsDialog] = useState({
+    isOpen: false,
+    customerId: null,
+    customerName: '',
+    inputValue: '30',
+    isLoading: false,
+    error: null,
+  })
+  const [recalculateDialog, setRecalculateDialog] = useState({
+    isOpen: false,
+    isLoading: false,
+    error: null,
+  })
+
+  const { user, logout } = useAuth()
+  const canDelete = user?.role === 'Admin'
+  const canCreateInvoice = user?.role === 'Admin' || user?.role === 'Manager'
 
   const ncfCategories = useMemo(() => {
     if (apiNcfCategories.length > 0) {
@@ -570,7 +647,7 @@ function App() {
       setError(null)
 
       try {
-        const response = await fetch(`${API_BASE_URL}/${config.endpoint}`)
+        const response = await apiFetch(`${API_BASE_URL}/${config.endpoint}`)
         if (!response.ok) {
           throw new Error(config.loadError)
         }
@@ -588,7 +665,7 @@ function App() {
 
   const loadCustomers = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/Customers`)
+      const response = await apiFetch(`${API_BASE_URL}/Customers`)
       if (!response.ok) {
         return
       }
@@ -605,6 +682,7 @@ function App() {
           name: typeof customer?.name === 'string' ? customer.name.trim() : '',
           address: typeof customer?.address === 'string' ? customer.address.trim() : '',
           contact: typeof customer?.contact === 'string' ? customer.contact.trim() : '',
+          defaultPaymentTermsDays: typeof customer?.defaultPaymentTermsDays === 'number' ? customer.defaultPaymentTermsDays : 30,
         }
 
         if (!normalized.name) {
@@ -633,7 +711,7 @@ function App() {
 
   const loadFiscalRegimes = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/Invoices/fiscal-regimes`)
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/fiscal-regimes`)
       if (!response.ok) return
       const data = await response.json()
       if (Array.isArray(data)) setFiscalRegimes(data)
@@ -655,7 +733,7 @@ function App() {
 
     const loadNcfCategories = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/Invoices/ncf-categories`)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/ncf-categories`)
         if (!response.ok) {
           return
         }
@@ -758,7 +836,7 @@ function App() {
       setStatus(null)
 
       try {
-        const response = await fetch(`${API_BASE_URL}/${config.endpoint}`, {
+        const response = await apiFetch(`${API_BASE_URL}/${config.endpoint}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -959,6 +1037,7 @@ function App() {
   const isInvoicesSection = activeSection === 'invoices'
   const isReceiptsSection = activeSection === 'receipts'
   const isPurchaseOrdersSection = activeSection === 'purchaseOrders'
+  const isAccountsPayableSection = activeSection === 'accountsPayable'
   const isNcfSequencesSection = activeSection === 'ncfSequences'
   const isEditingQuote = isQuotesSection && Boolean(editingQuote)
   const brandNote =
@@ -983,7 +1062,7 @@ function App() {
 
       try {
         setDownloadingId(doc.id)
-        const response = await fetch(
+        const response = await apiFetch(
           `${API_BASE_URL}/${section.endpoint}/${doc.id}/pdf`,
         )
 
@@ -1022,7 +1101,7 @@ function App() {
 
       try {
         setPreviewingId(doc.id)
-        const response = await fetch(
+        const response = await apiFetch(
           `${API_BASE_URL}/${section.endpoint}/${doc.id}/pdf`,
         )
 
@@ -1093,7 +1172,7 @@ function App() {
       setStatus(null)
 
       try {
-        const response = await fetch(`${API_BASE_URL}/${config.endpoint}/${quoteId}`, {
+        const response = await apiFetch(`${API_BASE_URL}/${config.endpoint}/${quoteId}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -1137,7 +1216,7 @@ function App() {
 
       try {
         setDuplicatingQuoteId(doc.id)
-        const response = await fetch(`${API_BASE_URL}/Quotes/${doc.id}/duplicate`, {
+        const response = await apiFetch(`${API_BASE_URL}/Quotes/${doc.id}/duplicate`, {
           method: 'POST',
         })
 
@@ -1211,7 +1290,7 @@ function App() {
       setIsSubmitting(true)
       setStatus(null)
       try {
-        const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${poId}`, {
+        const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${poId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -1249,9 +1328,166 @@ function App() {
     [editingPO, handleCreate, handleUpdatePO],
   )
 
+  // ── Accounts Payable handlers ───────────────────────────────────────────────
+
+  const handleEditAP = useCallback((doc) => {
+    setEditingAP(doc)
+    setStatus(null)
+    setActiveSection('accountsPayable')
+  }, [])
+
+  const handleCancelEditAP = useCallback(() => {
+    setEditingAP(null)
+    setStatus(null)
+  }, [])
+
+  const handleUpdateAP = useCallback(
+    async (apId, payload) => {
+      setIsSubmitting(true)
+      setStatus(null)
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/AccountsPayable/${apId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!response.ok) {
+          let detail = translate('sections.accountsPayable.updateError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch { /* ignore */ }
+          throw new Error(detail)
+        }
+        setStatus({ type: 'success', message: translate('sections.accountsPayable.updateSuccess') })
+        await loadSection('accountsPayable')
+        return true
+      } catch (error) {
+        setStatus({ type: 'error', message: error.message || translate('sections.accountsPayable.updateError') })
+        return false
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [loadSection, translate],
+  )
+
+  const handleAPSubmit = useCallback(
+    async (payload) => {
+      if (editingAP) {
+        const wasSuccessful = await handleUpdateAP(editingAP.id, payload)
+        if (wasSuccessful) setEditingAP(null)
+        return wasSuccessful
+      }
+      return handleCreate('accountsPayable', payload)
+    },
+    [editingAP, handleCreate, handleUpdateAP],
+  )
+
+  const handleMarkAPPaid = useCallback(
+    async (doc) => {
+      if (!doc) return
+      const payload = {
+        supplierName: doc.supplierName || doc.partyName || '',
+        customerPO: doc.customerPO || null,
+        amount: doc.totalAmount || 0,
+        currencyCode: doc.currencyCode || 'USD',
+        date: typeof doc.date === 'string' ? doc.date.slice(0, 10) : new Date(doc.date).toISOString().slice(0, 10),
+        dueDate: typeof doc.dueDate === 'string' ? doc.dueDate.slice(0, 10) : new Date(doc.dueDate).toISOString().slice(0, 10),
+        status: 'Pagado',
+        notes: doc.notes || null,
+      }
+      await handleUpdateAP(doc.id, payload)
+    },
+    [handleUpdateAP],
+  )
+
+  // ── Customer payment terms handlers ────────────────────────────────────────
+
+  const handleOpenPaymentTermsDialog = useCallback((customer) => {
+    setPaymentTermsDialog({
+      isOpen: true,
+      customerId: customer.id,
+      customerName: customer.name,
+      inputValue: String(customer.defaultPaymentTermsDays ?? 30),
+      isLoading: false,
+      error: null,
+    })
+  }, [])
+
+  const handleClosePaymentTermsDialog = useCallback(() => {
+    setPaymentTermsDialog((current) => ({ ...current, isOpen: false }))
+  }, [])
+
+  const handleSavePaymentTerms = useCallback(async () => {
+    const days = parseInt(paymentTermsDialog.inputValue, 10)
+    if (Number.isNaN(days) || days < 1 || days > 365) {
+      setPaymentTermsDialog((current) => ({
+        ...current,
+        error: translate('paymentTerms.daysInputHint'),
+      }))
+      return
+    }
+
+    setPaymentTermsDialog((current) => ({ ...current, isLoading: true, error: null }))
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/Customers/${paymentTermsDialog.customerId}/payment-terms`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ defaultPaymentTermsDays: days }),
+        },
+      )
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || body?.title || translate('paymentTerms.saveError'))
+      }
+      setPaymentTermsDialog((current) => ({ ...current, isOpen: false, isLoading: false }))
+      setStatus({ type: 'success', message: translate('paymentTerms.saveSuccess') })
+      await loadCustomers()
+    } catch (err) {
+      setPaymentTermsDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: err.message || translate('paymentTerms.saveError'),
+      }))
+    }
+  }, [loadCustomers, paymentTermsDialog.customerId, paymentTermsDialog.inputValue, translate])
+
+  // ── Recalculate due dates handler ──────────────────────────────────────────
+
+  const handleRecalculateDueDates = useCallback(async () => {
+    setRecalculateDialog((current) => ({ ...current, isLoading: true, error: null }))
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/AccountsPayable/recalculate-due-dates`, {
+        method: 'POST',
+      })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(body?.detail || body?.title || translate('paymentTerms.recalculateError'))
+      }
+      const count = body?.updatedCount ?? 0
+      setRecalculateDialog({ isOpen: false, isLoading: false, error: null })
+      setStatus({
+        type: 'success',
+        message: count === 0
+          ? translate('paymentTerms.recalculateNone')
+          : translate('paymentTerms.recalculateSuccess').replace('{{count}}', String(count)),
+      })
+      await loadSection('accountsPayable')
+    } catch (err) {
+      setRecalculateDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: err.message || translate('paymentTerms.recalculateError'),
+      }))
+    }
+  }, [loadSection, translate])
+
   const downloadInvoicePdfById = useCallback(
     async (invoiceId, fileNameSeed) => {
-      const response = await fetch(`${API_BASE_URL}/Invoices/${invoiceId}/pdf`)
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/${invoiceId}/pdf`)
       if (!response.ok) {
         throw new Error(translate('pdf.invoiceDownloadError'))
       }
@@ -1275,7 +1511,7 @@ function App() {
       const normalizedCategory =
         normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
 
-      const response = await fetch(`${API_BASE_URL}/Quotes/${quoteId}/convert`, {
+      const response = await apiFetch(`${API_BASE_URL}/Quotes/${quoteId}/convert`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -1307,7 +1543,7 @@ function App() {
       const normalizedCategory =
         normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
 
-      const response = await fetch(`${API_BASE_URL}/Invoices/${invoiceId}/ncf`, {
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/${invoiceId}/ncf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1333,7 +1569,7 @@ function App() {
 
   const undoQuoteConversion = useCallback(
     async (quoteId) => {
-      const response = await fetch(`${API_BASE_URL}/Quotes/${quoteId}/undo-conversion`, {
+      const response = await apiFetch(`${API_BASE_URL}/Quotes/${quoteId}/undo-conversion`, {
         method: 'POST',
       })
 
@@ -1348,7 +1584,7 @@ function App() {
 
   const fetchInvoiceNcfData = useCallback(
     async (invoiceId) => {
-      const response = await fetch(`${API_BASE_URL}/Invoices/${invoiceId}`)
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/${invoiceId}`)
       const body = await response.json().catch(() => null)
 
       if (!response.ok) {
@@ -1436,7 +1672,7 @@ function App() {
   const fetchSuggestedNcf = useCallback(async (requestedCategory) => {
     const normalizedCategory =
       normalizeNcfCategory(requestedCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
-    const response = await fetch(
+    const response = await apiFetch(
       `${API_BASE_URL}/Invoices/next-ncf?ncfCategory=${encodeURIComponent(normalizedCategory)}`,
     )
     const body = await response.json().catch(() => null)
@@ -1695,7 +1931,7 @@ function App() {
     })
 
     try {
-      const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${doc.id}/attachments`)
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${doc.id}/attachments`)
       if (!response.ok) throw new Error(translate('purchaseOrderForm.attachmentsLoading'))
       const data = await response.json()
       setAttachmentsDialog((current) => ({
@@ -1735,7 +1971,7 @@ function App() {
       const formData = new FormData()
       formData.append('file', file)
 
-      const response = await fetch(`${API_BASE_URL}/PurchaseOrders/${documentId}/attachments`, {
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${documentId}/attachments`, {
         method: 'POST',
         body: formData,
       })
@@ -1767,7 +2003,7 @@ function App() {
     setAttachmentsDialog((current) => ({ ...current, deletingId: attachmentId, error: null }))
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/PurchaseOrders/${documentId}/attachments/${attachmentId}`,
         { method: 'DELETE' },
       )
@@ -1793,7 +2029,7 @@ function App() {
     if (!documentId) return
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/PurchaseOrders/${documentId}/attachments/${attachment.id}/download`,
       )
       if (!response.ok) throw new Error(translate('pdf.downloadError'))
@@ -1830,7 +2066,7 @@ function App() {
     })
 
     try {
-      const response = await fetch(`${API_BASE_URL}/Quotes/${doc.id}/attachments`)
+      const response = await apiFetch(`${API_BASE_URL}/Quotes/${doc.id}/attachments`)
       if (!response.ok) throw new Error(translate('quoteAttachments.attachmentsLoading'))
       const data = await response.json()
       setQuoteAttachmentsDialog((current) => ({
@@ -1870,7 +2106,7 @@ function App() {
       const formData = new FormData()
       formData.append('file', file)
 
-      const response = await fetch(`${API_BASE_URL}/Quotes/${documentId}/attachments`, {
+      const response = await apiFetch(`${API_BASE_URL}/Quotes/${documentId}/attachments`, {
         method: 'POST',
         body: formData,
       })
@@ -1902,7 +2138,7 @@ function App() {
     setQuoteAttachmentsDialog((current) => ({ ...current, deletingId: attachmentId, error: null }))
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/Quotes/${documentId}/attachments/${attachmentId}`,
         { method: 'DELETE' },
       )
@@ -1928,7 +2164,7 @@ function App() {
     if (!documentId) return
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/Quotes/${documentId}/attachments/${attachment.id}/download`,
       )
       if (!response.ok) throw new Error(translate('pdf.downloadError'))
@@ -1983,7 +2219,7 @@ function App() {
           onClick: handleDuplicateQuote,
           variant: 'button--ghost',
         },
-        {
+        ...(canCreateInvoice ? [{
           label: (doc) =>
             doc?.convertedInvoiceId || doc?.convertedAt || doc?.invoiceGeneratedAt || doc?.ncfNumber
               ? translate('documentList.downloadInvoice')
@@ -1999,8 +2235,8 @@ function App() {
             void handleOpenNcfDialog(doc, 'generate')
           },
           variant: 'button--ghost',
-        },
-        {
+        }] : []),
+        ...(canCreateInvoice ? [{
           label: translate('documentList.editNcf'),
           loadingLabel: translate('documentList.editingNcf'),
           busyId: updatingNcfId,
@@ -2009,15 +2245,15 @@ function App() {
             void handleOpenNcfDialog(doc, 'edit')
           },
           variant: 'button--ghost',
-        },
-        {
+        }] : []),
+        ...(canDelete ? [{
           label: translate('documentList.undoInvoice'),
           loadingLabel: translate('documentList.undoingInvoice'),
           busyId: undoingQuoteId,
           isVisible: (doc) => Boolean(doc?.convertedInvoiceId || doc?.convertedAt),
           onClick: handleUndoConvertedInvoice,
           variant: 'button--ghost',
-        },
+        }] : []),
         {
           label: translate('purchaseOrderForm.logExpenseAction'),
           loadingLabel: translate('purchaseOrderForm.logExpenseAction'),
@@ -2063,21 +2299,47 @@ function App() {
       ]
     }
 
+    if (isAccountsPayableSection) {
+      return [
+        {
+          label: translate('accountPayableForm.editAction'),
+          loadingLabel: translate('accountPayableForm.editAction'),
+          busyId: editingAP?.id ?? null,
+          onClick: handleEditAP,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('accountPayableForm.markPaidAction'),
+          loadingLabel: translate('accountPayableForm.markPaidLoading'),
+          busyId: null,
+          isVisible: (doc) => doc?.status !== 'Pagado',
+          onClick: handleMarkAPPaid,
+          variant: 'button--ghost',
+        },
+      ]
+    }
+
     return [previewAction]
   }, [
+    canCreateInvoice,
+    canDelete,
     duplicatingQuoteId,
+    editingAP?.id,
     editingQuote?.id,
     handleDuplicateQuote,
+    handleEditAP,
     handleEditPO,
     handleEditQuote,
     handleGenerateInvoice,
     handleLogExpense,
+    handleMarkAPPaid,
     handleOpenAttachmentsDialog,
     handleOpenNcfDialog,
     handleOpenQuoteAttachmentsDialog,
     handlePreviewDocument,
     handleUndoConvertedInvoice,
     invoiceGeneratingId,
+    isAccountsPayableSection,
     isInvoicesSection,
     isPurchaseOrdersSection,
     isQuotesSection,
@@ -2133,7 +2395,7 @@ function App() {
     }
     setEditSequenceDialog((current) => ({ ...current, isLoading: true, error: null }))
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/Invoices/ncf-sequences/${editSequenceDialog.categoryCode}`,
         {
           method: 'PUT',
@@ -2200,6 +2462,19 @@ function App() {
           <span className="top-nav__title">{translate('app.title')}</span>
         </div>
         <div className="top-nav__controls">
+          {user ? (
+            <div className="top-nav__user">
+              <span className="top-nav__user-name">{user.name}</span>
+              <span className="pill pill--muted">{user.role}</span>
+              <button
+                type="button"
+                className="button button--ghost button--compact"
+                onClick={logout}
+              >
+                Cerrar sesión
+              </button>
+            </div>
+          ) : null}
           <label className="toolbar__control">
             {translate('controls.language')}
             <select value={language} onChange={(event) => setLanguage(event.target.value)}>
@@ -2489,6 +2764,83 @@ function App() {
               onCancelEdit={handleCancelEditPO}
               prefillQuoteId={prefillPOQuoteId}
             />
+          ) : isAccountsPayableSection ? (
+            editingAP ? (
+              <AccountPayableForm
+                onSubmit={handleAPSubmit}
+                isSubmitting={isSubmitting}
+                t={translate}
+                initialAP={editingAP}
+                mode="edit"
+                onCancelEdit={handleCancelEditAP}
+              />
+            ) : (
+              <>
+                <div className="quote-cta">
+                  <div className="quote-cta__copy">
+                    <p>{translate('sections.accountsPayable.autoHint')}</p>
+                  </div>
+                  <div className="quote-cta__actions">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => setActiveSection('quotes')}
+                    >
+                      {translate('sections.accountsPayable.openQuotes')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="section-intro section-intro--with-action" style={{ marginTop: '2rem' }}>
+                  <div className="section-intro__copy">
+                    <h3 style={{ margin: '0 0 0.25rem' }}>{translate('paymentTerms.heading')}</h3>
+                    <p style={{ margin: 0 }}>{translate('paymentTerms.description')}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => setRecalculateDialog({ isOpen: true, isLoading: false, error: null })}
+                  >
+                    {translate('paymentTerms.recalculateButton')}
+                  </button>
+                </div>
+
+                {customers.length === 0 ? (
+                  <p className="muted">{translate('paymentTerms.noCustomers')}</p>
+                ) : (
+                  <div className="document-table-wrapper">
+                    <table className="document-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">{translate('paymentTerms.customerLabel')}</th>
+                          <th scope="col" style={{ textAlign: 'right' }}>{translate('paymentTerms.daysLabel')}</th>
+                          <th scope="col" style={{ textAlign: 'right' }}>{translate('documentList.actions')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customers.map((customer) => (
+                          <tr key={customer.id}>
+                            <td>{customer.name}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <strong>{customer.defaultPaymentTermsDays ?? 30}</strong>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <button
+                                type="button"
+                                className="button button--ghost button--compact"
+                                onClick={() => handleOpenPaymentTermsDialog(customer)}
+                              >
+                                {translate('paymentTerms.editAction')}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )
           ) : (
             <div className="quote-cta">
               <div className="quote-cta__copy">
@@ -2566,16 +2918,18 @@ function App() {
                         >
                           {translate('purchaseOrderForm.attachDownload')}
                         </button>
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => handleDeleteAttachment(attachment.id)}
-                          disabled={isDeleting}
-                        >
-                          {isDeleting
-                            ? translate('purchaseOrderForm.attachDeleting')
-                            : translate('purchaseOrderForm.attachDelete')}
-                        </button>
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => handleDeleteAttachment(attachment.id)}
+                            disabled={isDeleting}
+                          >
+                            {isDeleting
+                              ? translate('purchaseOrderForm.attachDeleting')
+                              : translate('purchaseOrderForm.attachDelete')}
+                          </button>
+                        ) : null}
                       </div>
                     </li>
                   )
@@ -2641,16 +2995,18 @@ function App() {
                         >
                           {translate('quoteAttachments.attachDownload')}
                         </button>
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => handleDeleteQuoteAttachment(attachment.id)}
-                          disabled={isDeleting}
-                        >
-                          {isDeleting
-                            ? translate('quoteAttachments.attachDeleting')
-                            : translate('quoteAttachments.attachDelete')}
-                        </button>
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => handleDeleteQuoteAttachment(attachment.id)}
+                            disabled={isDeleting}
+                          >
+                            {isDeleting
+                              ? translate('quoteAttachments.attachDeleting')
+                              : translate('quoteAttachments.attachDelete')}
+                          </button>
+                        ) : null}
                       </div>
                     </li>
                   )
@@ -2771,6 +3127,98 @@ function App() {
                 {ncfDialog.isLoading
                   ? translate(isNcfEditMode ? 'documentList.editingNcf' : 'documentList.generatingInvoice')
                   : translate(isNcfEditMode ? 'pdf.ncfDialogConfirmEdit' : 'pdf.ncfDialogConfirm')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {recalculateDialog.isOpen ? (
+        <Modal
+          isOpen={recalculateDialog.isOpen}
+          onClose={recalculateDialog.isLoading ? undefined : () => setRecalculateDialog({ isOpen: false, isLoading: false, error: null })}
+          title={translate('paymentTerms.recalculateConfirmTitle')}
+          description={translate('paymentTerms.recalculateConfirmDescription')}
+          eyebrow={translate('paymentTerms.heading')}
+        >
+          <div className="form-fields">
+            {recalculateDialog.error ? (
+              <p className="input-hint input-hint--error">{recalculateDialog.error}</p>
+            ) : null}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => setRecalculateDialog({ isOpen: false, isLoading: false, error: null })}
+                disabled={recalculateDialog.isLoading}
+              >
+                {translate('paymentTerms.recalculateCancel')}
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleRecalculateDueDates}
+                disabled={recalculateDialog.isLoading}
+              >
+                {recalculateDialog.isLoading
+                  ? translate('paymentTerms.recalculateRunning')
+                  : translate('paymentTerms.recalculateConfirm')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {paymentTermsDialog.isOpen ? (
+        <Modal
+          isOpen={paymentTermsDialog.isOpen}
+          onClose={paymentTermsDialog.isLoading ? undefined : handleClosePaymentTermsDialog}
+          title={translate('paymentTerms.editDialogTitle')}
+          description={paymentTermsDialog.customerName}
+          eyebrow={translate('paymentTerms.heading')}
+        >
+          <div className="form-fields">
+            <label className="modal-input">
+              {translate('paymentTerms.daysInputLabel')}
+              <input
+                type="number"
+                min={1}
+                max={365}
+                step={1}
+                value={paymentTermsDialog.inputValue}
+                onChange={(event) =>
+                  setPaymentTermsDialog((current) => ({
+                    ...current,
+                    inputValue: event.target.value,
+                    error: null,
+                  }))
+                }
+                disabled={paymentTermsDialog.isLoading}
+                autoFocus
+              />
+            </label>
+            <p className="input-hint">{translate('paymentTerms.daysInputHint')}</p>
+            {paymentTermsDialog.error ? (
+              <p className="input-hint input-hint--error">{paymentTermsDialog.error}</p>
+            ) : null}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={handleClosePaymentTermsDialog}
+                disabled={paymentTermsDialog.isLoading}
+              >
+                {translate('paymentTerms.cancelButton')}
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleSavePaymentTerms}
+                disabled={paymentTermsDialog.isLoading || !paymentTermsDialog.inputValue.trim()}
+              >
+                {paymentTermsDialog.isLoading
+                  ? translate('paymentTerms.saving')
+                  : translate('paymentTerms.saveButton')}
               </button>
             </div>
           </div>

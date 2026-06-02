@@ -371,6 +371,9 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
+        // Capture before TryAssignNcfNumber sets it — used to detect first-time assignment.
+        var isFirstAssignment = !invoice.InvoiceGeneratedAt.HasValue;
+
         if (!TryAssignNcfNumber(
                 invoice,
                 request?.NcfNumber,
@@ -380,6 +383,32 @@ public class InvoicesController : ControllerBase
                 out var errorResult))
         {
             return errorResult!;
+        }
+
+        // Auto-create an AccountPayable the first time an invoice gets its NCF.
+        if (isFirstAssignment && !_context.AccountsPayable.Any(ap => ap.InvoiceId == invoice.Id))
+        {
+            var paymentTermsDays = invoice.CustomerId.HasValue
+                ? _context.Customers
+                    .Where(c => c.Id == invoice.CustomerId.Value)
+                    .Select(c => (int?)c.DefaultPaymentTermsDays)
+                    .FirstOrDefault() ?? 30
+                : 30;
+
+            _context.AccountsPayable.Add(new AccountPayable
+            {
+                Id = Guid.NewGuid(),
+                Number = $"AP-{invoice.Number}",
+                SupplierName = invoice.CustomerName ?? invoice.PartyName,
+                TotalAmount = invoice.TotalAmount,
+                CurrencyCode = invoice.CurrencyCode,
+                CultureName = invoice.CultureName,
+                Date = invoice.Date,
+                DueDate = invoice.Date.AddDays(paymentTermsDays),
+                Status = "Pendiente",
+                InvoiceId = invoice.Id,
+            });
+            _context.SaveChanges();
         }
 
         return Ok(new NcfAssignmentResponse(

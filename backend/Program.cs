@@ -2,7 +2,10 @@ using IORManager.Data;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using System.Text.Json.Serialization;
 
 namespace IORManager;
@@ -19,6 +22,7 @@ public class Program
             // Avoid JSON serializer errors when EF navigation properties create object reference cycles
             // (e.g., Invoice -> Lines -> Invoice). Ignore cycles so repeated references are omitted.
             .AddJsonOptions(opts => opts.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
+
         const string corsPolicyName = "AllowFrontend";
         builder.Services.AddCors(options =>
         {
@@ -29,6 +33,26 @@ public class Program
                     .AllowAnyMethod();
             });
         });
+
+        // JWT Authentication
+        var jwtKey = builder.Configuration["Jwt:Key"]
+            ?? throw new InvalidOperationException("Jwt:Key is not configured in appsettings.");
+        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
+            {
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = builder.Configuration["Jwt:Issuer"],
+                    ValidAudience = builder.Configuration["Jwt:Audience"],
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                };
+            });
+        builder.Services.AddAuthorization();
+
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
@@ -53,6 +77,7 @@ public class Program
 
         app.UseCors(corsPolicyName);
 
+        app.UseAuthentication();
         app.UseAuthorization();
 
         app.MapControllers();
@@ -92,6 +117,14 @@ public class Program
             return new EfFinancialDocumentRepository<PurchaseOrder>(
                 context,
                 query => query.Include(purchaseOrder => purchaseOrder.Lines));
+        });
+
+        services.AddScoped<IFinancialDocumentRepository<AccountPayable>>(provider =>
+        {
+            var context = provider.GetRequiredService<IORManagerContext>();
+            return new EfFinancialDocumentRepository<AccountPayable>(
+                context,
+                query => query.Include(ap => ap.Invoice));
         });
     }
 }
