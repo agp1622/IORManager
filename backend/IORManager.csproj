@@ -19,6 +19,8 @@
         <PackageReference Include="DocumentFormat.OpenXml" Version="3.0.2" />
     </ItemGroup>
 
+
+
     <ItemGroup>
         <Content Include="Assets\papavelag-logo.svg">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -31,5 +33,11 @@
     <ItemGroup>
         <Compile Remove="tests\**\*.cs" />
     </ItemGroup>
+    <ItemGroup>
+    <Compile Remove="tests\**\*.cs" />
+    <Content Remove="tests\**" />
+    <None Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+</ItemGroup>
 
 </Project>
