@@ -82,6 +82,11 @@ public class IORManagerContext : DbContext
             builder.Property(document => document.Date)
                 .HasConversion(converter)
                 .Metadata.SetValueComparer(comparer);
+
+            // Soft-deleted documents (DeletedAt set) are hidden from all normal queries.
+            // Use IgnoreQueryFilters() to reach trashed/recoverable records (e.g. trash listings,
+            // restore actions, and the background purge job).
+            builder.HasQueryFilter(document => document.DeletedAt == null);
         });
     }
 

@@ -86,6 +86,9 @@ public class Program
         builder.Services.AddDbContext<IORManagerContext>(options =>
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+        // Permanently purges invoices/quotes once their 1-year soft-delete recovery window elapses.
+        builder.Services.AddHostedService<SoftDeletePurgeService>();
+
         RegisterRepositories(builder.Services);
 
         var app = builder.Build();

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace IORManager.Models;
 
@@ -27,4 +28,17 @@ public abstract class FinancialDocument
 
     [DataType(DataType.Currency)]
     public decimal TotalAmount { get; set; }
+
+    /// <summary>
+    /// When set, the document has been soft-deleted (moved to trash) as of this UTC timestamp.
+    /// Excluded from normal queries via a global query filter. Records are permanently purged
+    /// once <see cref="SoftDeleteRecoveryWindow"/> has elapsed since this timestamp.
+    /// </summary>
+    public DateTime? DeletedAt { get; set; }
+
+    [NotMapped]
+    public bool IsDeleted => DeletedAt.HasValue;
+
+    /// <summary>How long a soft-deleted document remains recoverable before permanent purge.</summary>
+    public static TimeSpan SoftDeleteRecoveryWindow => TimeSpan.FromDays(365);
 }

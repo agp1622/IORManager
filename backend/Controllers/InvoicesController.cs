@@ -4,6 +4,7 @@ using IORManager.Dtos;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,6 +52,69 @@ public class InvoicesController : ControllerBase
         }
 
         PopulateQuoteNumbers([invoice]);
+        return Ok(invoice);
+    }
+
+    /// <summary>Lists soft-deleted invoices still inside their 1-year recovery window (the "trash").</summary>
+    [HttpGet("trash")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult<IReadOnlyCollection<Invoice>> GetTrashedInvoices()
+    {
+        var cutoff = DateTime.UtcNow - FinancialDocument.SoftDeleteRecoveryWindow;
+        var invoices = _context.Invoices
+            .IgnoreQueryFilters()
+            .Include(invoice => invoice.Lines)
+            .Where(invoice => invoice.DeletedAt != null && invoice.DeletedAt >= cutoff)
+            .OrderByDescending(invoice => invoice.DeletedAt)
+            .ToList();
+
+        PopulateQuoteNumbers(invoices);
+        return Ok(invoices);
+    }
+
+    /// <summary>Soft-deletes an invoice. It remains recoverable for 1 year via <see cref="RestoreInvoice"/>.</summary>
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult DeleteInvoice(Guid id)
+    {
+        var invoice = _context.Invoices.FirstOrDefault(existing => existing.Id == id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        invoice.DeletedAt = DateTime.UtcNow;
+        _context.SaveChanges();
+        return NoContent();
+    }
+
+    /// <summary>Restores a soft-deleted invoice, provided its recovery window hasn't expired.</summary>
+    [HttpPost("{id:guid}/restore")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult<Invoice> RestoreInvoice(Guid id)
+    {
+        var invoice = _context.Invoices
+            .IgnoreQueryFilters()
+            .Include(existing => existing.Lines)
+            .FirstOrDefault(existing => existing.Id == id);
+
+        if (invoice is null || invoice.DeletedAt is null)
+        {
+            return NotFound();
+        }
+
+        var cutoff = DateTime.UtcNow - FinancialDocument.SoftDeleteRecoveryWindow;
+        if (invoice.DeletedAt < cutoff)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Recovery window expired",
+                Detail = "This invoice was deleted more than a year ago and can no longer be restored.",
+            });
+        }
+
+        invoice.DeletedAt = null;
+        _context.SaveChanges();
         return Ok(invoice);
     }
 

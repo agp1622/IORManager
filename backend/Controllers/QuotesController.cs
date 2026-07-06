@@ -4,6 +4,7 @@ using IORManager.Dtos;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -66,6 +67,68 @@ public class QuotesController : ControllerBase
     {
         var quote = _repository.GetById(id);
         return quote is not null ? Ok(quote) : NotFound();
+    }
+
+    /// <summary>Lists soft-deleted quotes still inside their 1-year recovery window (the "trash").</summary>
+    [HttpGet("trash")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult<IReadOnlyCollection<Quote>> GetTrashedQuotes()
+    {
+        var cutoff = DateTime.UtcNow - FinancialDocument.SoftDeleteRecoveryWindow;
+        var quotes = _context.Quotes
+            .IgnoreQueryFilters()
+            .Include(quote => quote.Lines)
+            .Where(quote => quote.DeletedAt != null && quote.DeletedAt >= cutoff)
+            .OrderByDescending(quote => quote.DeletedAt)
+            .ToList();
+
+        return Ok(quotes);
+    }
+
+    /// <summary>Soft-deletes a quote. It remains recoverable for 1 year via <see cref="RestoreQuote"/>.</summary>
+    [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult DeleteQuote(Guid id)
+    {
+        var quote = _context.Quotes.FirstOrDefault(existing => existing.Id == id);
+        if (quote is null)
+        {
+            return NotFound();
+        }
+
+        quote.DeletedAt = DateTime.UtcNow;
+        _context.SaveChanges();
+        return NoContent();
+    }
+
+    /// <summary>Restores a soft-deleted quote, provided its recovery window hasn't expired.</summary>
+    [HttpPost("{id:guid}/restore")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult<Quote> RestoreQuote(Guid id)
+    {
+        var quote = _context.Quotes
+            .IgnoreQueryFilters()
+            .Include(existing => existing.Lines)
+            .FirstOrDefault(existing => existing.Id == id);
+
+        if (quote is null || quote.DeletedAt is null)
+        {
+            return NotFound();
+        }
+
+        var cutoff = DateTime.UtcNow - FinancialDocument.SoftDeleteRecoveryWindow;
+        if (quote.DeletedAt < cutoff)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Recovery window expired",
+                Detail = "This quote was deleted more than a year ago and can no longer be restored.",
+            });
+        }
+
+        quote.DeletedAt = null;
+        _context.SaveChanges();
+        return Ok(quote);
     }
 
     [HttpPost]

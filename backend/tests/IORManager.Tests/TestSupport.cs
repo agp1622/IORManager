@@ -115,5 +115,10 @@ internal static class TestSupport
         public byte[] GenerateReceiptPdf(Receipt receipt) => [];
 
         public byte[] GeneratePurchaseOrderPdf(PurchaseOrder purchaseOrder) => [];
+
+        byte[] IFinancialDocumentPdfService.GenerateQuotePdf(Invoice invoice, string? comments)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

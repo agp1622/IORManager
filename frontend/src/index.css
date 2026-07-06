@@ -48,6 +48,12 @@
   --button-icon-border: rgba(255, 123, 43, 0.35);
   --button-icon-hover-bg: rgba(255, 123, 43, 0.25);
   --body-gradient: linear-gradient(160deg, #f5f7ff 0%, #f0f4ff 50%, #e6efff 100%);
+  --dropdown-menu-bg: #ffffff;
+  --placeholder-color: rgba(15, 23, 42, 0.4);
+  --input-bg: #ffffff;
+  --input-border: rgba(15, 23, 42, 0.18);
+  --brand-cyan: #2f8fd1;
+  --brand-orange: #d97a24;
 }
 
 :root[data-theme='dark'] {
@@ -95,6 +101,12 @@
   --body-gradient: radial-gradient(circle at 20% 20%, rgba(6, 86, 179, 0.35), transparent 45%),
     radial-gradient(circle at 80% 0%, rgba(255, 123, 43, 0.2), transparent 40%),
     linear-gradient(160deg, #01050f 0%, #031129 50%, #050d1f 100%);
+  --dropdown-menu-bg: rgba(4, 17, 39, 0.98);
+  --placeholder-color: rgba(255, 255, 255, 0.4);
+  --input-bg: rgba(255, 255, 255, 0.02);
+  --input-border: rgba(255, 255, 255, 0.18);
+  --brand-cyan: #7dc8ff;
+  --brand-orange: #ffb347;
 }
 
 *,

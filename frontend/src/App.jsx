@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth, apiFetch } from './contexts/AuthContext'
 import InvoiceForm from './components/InvoiceForm'
 import ReceiptForm from './components/ReceiptForm'
@@ -172,6 +173,50 @@ const DocumentList = ({
   const isInvoiceList = config?.endpoint === 'Invoices'
   const isAccountsPayableList = config?.endpoint === 'AccountsPayable'
   const [openActionsId, setOpenActionsId] = useState(null)
+  const [menuPosition, setMenuPosition] = useState(null)
+  const actionButtonRefs = useRef({})
+
+  // The actions menu is rendered in a portal (see below) so it can escape the
+  // table wrapper's `overflow-x: auto`, which otherwise clips it whenever a
+  // row is near the edge of the scrollable area. Position is computed from
+  // the trigger button's on-screen coordinates and kept in `position: fixed`
+  // coordinates, which are viewport-relative and unaffected by ancestor overflow.
+  const updateMenuPosition = useCallback((documentId) => {
+    const button = actionButtonRefs.current[documentId]
+    if (!button) {
+      return
+    }
+
+    const rect = button.getBoundingClientRect()
+    const estimatedMenuHeight = 260
+    const openUpward = rect.bottom + estimatedMenuHeight > window.innerHeight && rect.top > estimatedMenuHeight
+
+    setMenuPosition({
+      top: openUpward ? rect.top : rect.bottom,
+      right: Math.max(8, window.innerWidth - rect.right),
+      openUpward,
+    })
+  }, [])
+
+  const toggleActionsMenu = useCallback(
+    (documentId) => {
+      setOpenActionsId((current) => {
+        const next = current === documentId ? null : documentId
+        if (next) {
+          updateMenuPosition(next)
+        } else {
+          setMenuPosition(null)
+        }
+        return next
+      })
+    },
+    [updateMenuPosition],
+  )
+
+  const closeActionsMenu = useCallback(() => {
+    setOpenActionsId(null)
+    setMenuPosition(null)
+  }, [])
 
   useEffect(() => {
     if (!openActionsId) {
@@ -184,26 +229,37 @@ const DocumentList = ({
         return
       }
 
-      if (target.closest('.document-table__actions')) {
+      if (target.closest('.document-table__actions') || target.closest('.document-actions-menu')) {
         return
       }
 
-      setOpenActionsId(null)
+      closeActionsMenu()
     }
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
-        setOpenActionsId(null)
+        closeActionsMenu()
       }
+    }
+
+    // Scrolling or resizing invalidates the computed fixed position — simplest
+    // and safest is to just close the menu rather than track every scroll
+    // container the row might live inside.
+    const handleScrollOrResize = () => {
+      closeActionsMenu()
     }
 
     document.addEventListener('mousedown', handleMouseDown)
     document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('scroll', handleScrollOrResize, true)
+    window.addEventListener('resize', handleScrollOrResize)
     return () => {
       document.removeEventListener('mousedown', handleMouseDown)
       document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('scroll', handleScrollOrResize, true)
+      window.removeEventListener('resize', handleScrollOrResize)
     }
-  }, [openActionsId])
+  }, [openActionsId, closeActionsMenu])
 
   const getAriaSort = (key) => {
     if (!sortConfig || sortConfig.key !== key) {
@@ -357,7 +413,10 @@ const DocumentList = ({
                     </td>
                   )
                 })() : null}
-                <td data-heading={t('documentList.currency')}>
+                <td
+                  data-heading={t('documentList.currency')}
+                  className="document-table__cell--currency"
+                >
                   {currencyCode || '—'}
                 </td>
                 {!isAccountsPayableList ? (
@@ -383,11 +442,16 @@ const DocumentList = ({
                 ) : null}
                 <td data-heading={t('documentList.actions')} className="document-table__actions">
                   <button
+                    ref={(node) => {
+                      if (node) {
+                        actionButtonRefs.current[document.id] = node
+                      } else {
+                        delete actionButtonRefs.current[document.id]
+                      }
+                    }}
                     type="button"
                     className="button button--secondary document-actions-toggle"
-                    onClick={() =>
-                      setOpenActionsId((current) => (current === document.id ? null : document.id))
-                    }
+                    onClick={() => toggleActionsMenu(document.id)}
                     aria-haspopup="menu"
                     aria-expanded={openActionsId === document.id}
                     aria-label={t('documentList.actions')}
@@ -396,49 +460,63 @@ const DocumentList = ({
                     <span aria-hidden="true">⋯</span>
                   </button>
 
-                  {openActionsId === document.id ? (
-                    <div className="document-actions-menu" role="menu" aria-label={t('documentList.actions')}>
-                      <button
-                        type="button"
-                        className="document-actions-menu__item"
-                        onClick={() => {
-                          setOpenActionsId(null)
-                          onDownloadPdf(document)
-                        }}
-                        disabled={isDownloading}
-                      >
-                        {isDownloading ? t('documentList.downloading') : t('documentList.downloadPdf')}
-                      </button>
-                      {extraActions.map((action, index) => {
-                        const shouldRender =
-                          typeof action.isVisible === 'function' ? action.isVisible(document) : true
-                        if (!shouldRender) {
-                          return null
-                        }
-
-                        const resolveLabel = (value) =>
-                          typeof value === 'function' ? value(document) : value
-                        const isBusy = action.busyId === document.id
-                        const actionLabel = resolveLabel(action.label)
-                        const loadingLabel = resolveLabel(action.loadingLabel)
-
-                        return (
+                  {openActionsId === document.id && menuPosition
+                    ? createPortal(
+                        <div
+                          className={`document-actions-menu ${menuPosition.openUpward ? 'document-actions-menu--upward' : ''}`}
+                          role="menu"
+                          aria-label={t('documentList.actions')}
+                          style={{
+                            position: 'fixed',
+                            right: menuPosition.right,
+                            ...(menuPosition.openUpward
+                              ? { bottom: window.innerHeight - menuPosition.top }
+                              : { top: menuPosition.top }),
+                          }}
+                        >
                           <button
-                            key={`${actionLabel}-${index}`}
                             type="button"
                             className="document-actions-menu__item"
                             onClick={() => {
-                              setOpenActionsId(null)
-                              action.onClick(document)
+                              closeActionsMenu()
+                              onDownloadPdf(document)
                             }}
-                            disabled={isBusy}
+                            disabled={isDownloading}
                           >
-                            {isBusy ? loadingLabel : actionLabel}
+                            {isDownloading ? t('documentList.downloading') : t('documentList.downloadPdf')}
                           </button>
-                        )
-                      })}
-                    </div>
-                  ) : null}
+                          {extraActions.map((action, index) => {
+                            const shouldRender =
+                              typeof action.isVisible === 'function' ? action.isVisible(document) : true
+                            if (!shouldRender) {
+                              return null
+                            }
+
+                            const resolveLabel = (value) =>
+                              typeof value === 'function' ? value(document) : value
+                            const isBusy = action.busyId === document.id
+                            const actionLabel = resolveLabel(action.label)
+                            const loadingLabel = resolveLabel(action.loadingLabel)
+
+                            return (
+                              <button
+                                key={`${actionLabel}-${index}`}
+                                type="button"
+                                className="document-actions-menu__item"
+                                onClick={() => {
+                                  closeActionsMenu()
+                                  action.onClick(document)
+                                }}
+                                disabled={isBusy}
+                              >
+                                {isBusy ? loadingLabel : actionLabel}
+                              </button>
+                            )
+                          })}
+                        </div>,
+                        window.document.body,
+                      )
+                    : null}
                 </td>
               </tr>
             )
@@ -512,10 +590,15 @@ function App() {
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
   const [editingQuote, setEditingQuote] = useState(null)
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false)
   const [editingPO, setEditingPO] = useState(null)
   const [prefillPOQuoteId, setPrefillPOQuoteId] = useState(null)
   const [editingAP, setEditingAP] = useState(null)
   const [pageBySection, setPageBySection] = useState({ quotes: 1, invoices: 1, receipts: 1, purchaseOrders: 1, accountsPayable: 1 })
+  const [viewingTrash, setViewingTrash] = useState(false)
+  const [trashDocuments, setTrashDocuments] = useState({ quotes: [], invoices: [] })
+  const [deletingId, setDeletingId] = useState(null)
+  const [restoringId, setRestoringId] = useState(null)
   const [attachmentsDialog, setAttachmentsDialog] = useState({
     isOpen: false,
     documentId: null,
@@ -663,6 +746,33 @@ function App() {
     [sectionConfig],
   )
 
+  const loadTrash = useCallback(
+    async (sectionKey) => {
+      const config = sectionConfig[sectionKey]
+      if (!config?.endpoint) {
+        return
+      }
+
+      setLoading(true)
+      setError(null)
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/${config.endpoint}/trash`)
+        if (!response.ok) {
+          throw new Error(config.loadError)
+        }
+
+        const data = await response.json()
+        setTrashDocuments((current) => ({ ...current, [sectionKey]: data }))
+      } catch (requestError) {
+        setError(requestError.message || config.loadError)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [sectionConfig],
+  )
+
   const loadCustomers = useCallback(async () => {
     try {
       const response = await apiFetch(`${API_BASE_URL}/Customers`)
@@ -777,6 +887,20 @@ function App() {
     }
   }, [activeSection])
 
+  const supportsTrash = activeSection === 'quotes' || activeSection === 'invoices'
+
+  useEffect(() => {
+    if (!supportsTrash) {
+      setViewingTrash(false)
+    }
+  }, [supportsTrash])
+
+  useEffect(() => {
+    if (viewingTrash && supportsTrash) {
+      loadTrash(activeSection)
+    }
+  }, [viewingTrash, supportsTrash, activeSection, loadTrash])
+
   useEffect(() => {
     setPageBySection((previous) => {
       const currentPage = previous[activeSection] ?? 1
@@ -852,7 +976,7 @@ function App() {
         }
 
         let downloadSucceeded = true
-        if (sectionKey === 'quotes' && responseBody?.pdfBase64) {
+        if ((sectionKey === 'quotes' || sectionKey === 'invoices') && responseBody?.pdfBase64) {
           try {
             triggerPdfDownload(responseBody.pdfFileName, responseBody.pdfBase64)
           } catch (downloadError) {
@@ -884,7 +1008,7 @@ function App() {
   )
 
   const filteredDocuments = useMemo(() => {
-    const source = documents[activeSection] ?? []
+    const source = (viewingTrash ? trashDocuments[activeSection] : documents[activeSection]) ?? []
     const searchTerm = filters.search.trim().toLowerCase()
     const clientTerm = filters.client.trim().toLowerCase()
     const numberTerm = filters.number.trim().toLowerCase()
@@ -957,7 +1081,7 @@ function App() {
 
       return matchesClient && matchesNumber && matchesDate && matchesNcf && matchesSearch
     })
-  }, [documents, activeSection, filters])
+  }, [documents, trashDocuments, viewingTrash, activeSection, filters])
 
   const sortedDocuments = useMemo(() => {
     const docs = [...filteredDocuments]
@@ -1246,6 +1370,88 @@ function App() {
     [loadCustomers, loadSection, translate],
   )
 
+  // ── Delete / restore (soft-delete with 1-year recovery window) ────────────
+
+  const handleDeleteDocument = useCallback(
+    async (doc) => {
+      const section = sectionConfig[activeSection]
+      if (!section || !doc?.id) {
+        return
+      }
+
+      if (typeof window !== 'undefined' && !window.confirm(translate('documentList.deleteConfirm'))) {
+        return
+      }
+
+      try {
+        setDeletingId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/${section.endpoint}/${doc.id}`, {
+          method: 'DELETE',
+        })
+
+        if (!response.ok && response.status !== 204) {
+          let detail = translate('documentList.deleteError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        setStatus({ type: 'success', message: translate('documentList.deleteSuccess') })
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.deleteError'),
+        })
+      } finally {
+        setDeletingId(null)
+      }
+    },
+    [activeSection, loadSection, sectionConfig, translate],
+  )
+
+  const handleRestoreDocument = useCallback(
+    async (doc) => {
+      const section = sectionConfig[activeSection]
+      if (!section || !doc?.id) {
+        return
+      }
+
+      try {
+        setRestoringId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/${section.endpoint}/${doc.id}/restore`, {
+          method: 'POST',
+        })
+
+        const body = await response.json().catch(() => null)
+        if (!response.ok) {
+          const detail = body?.title || body?.detail || translate('documentList.restoreError')
+          throw new Error(detail)
+        }
+
+        setStatus({ type: 'success', message: translate('documentList.restoreSuccess') })
+        await Promise.all([loadTrash(activeSection), loadSection(activeSection)])
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.restoreError'),
+        })
+      } finally {
+        setRestoringId(null)
+      }
+    },
+    [activeSection, loadSection, loadTrash, sectionConfig, translate],
+  )
+
+  const handleToggleTrash = useCallback(() => {
+    setViewingTrash((current) => !current)
+    setStatus(null)
+  }, [])
+
   const handleQuoteSubmit = useCallback(
     async (payload) => {
       if (editingQuote) {
@@ -1264,6 +1470,28 @@ function App() {
       return created
     },
     [editingQuote, handleCreate, handleUpdateQuote],
+  )
+
+  // ── Standalone invoice creation (no quote required) ────────────────────────
+
+  const handleOpenInvoiceModal = useCallback(() => {
+    setStatus(null)
+    setIsInvoiceModalOpen(true)
+  }, [])
+
+  const handleCloseInvoiceModal = useCallback(() => {
+    setIsInvoiceModalOpen(false)
+  }, [])
+
+  const handleInvoiceSubmit = useCallback(
+    async (payload) => {
+      const created = await handleCreate('invoices', payload)
+      if (created) {
+        setIsInvoiceModalOpen(false)
+      }
+      return created
+    },
+    [handleCreate],
   )
 
   const handleEditPO = useCallback((doc) => {
@@ -2195,6 +2423,18 @@ function App() {
       variant: 'button--ghost',
     }
 
+    if (viewingTrash && (isQuotesSection || isInvoicesSection)) {
+      return [
+        {
+          label: translate('documentList.restore'),
+          loadingLabel: translate('documentList.restoring'),
+          busyId: restoringId,
+          onClick: handleRestoreDocument,
+          variant: 'button--ghost',
+        },
+      ]
+    }
+
     if (isQuotesSection) {
       return [
         {
@@ -2261,6 +2501,13 @@ function App() {
           onClick: handleLogExpense,
           variant: 'button--ghost',
         },
+        ...(canDelete ? [{
+          label: translate('documentList.delete'),
+          loadingLabel: translate('documentList.deleting'),
+          busyId: deletingId,
+          onClick: handleDeleteDocument,
+          variant: 'button--ghost',
+        }] : []),
       ]
     }
 
@@ -2276,6 +2523,13 @@ function App() {
           },
           variant: 'button--ghost',
         },
+        ...(canDelete ? [{
+          label: translate('documentList.delete'),
+          loadingLabel: translate('documentList.deleting'),
+          busyId: deletingId,
+          onClick: handleDeleteDocument,
+          variant: 'button--ghost',
+        }] : []),
       ]
     }
 
@@ -2323,9 +2577,11 @@ function App() {
   }, [
     canCreateInvoice,
     canDelete,
+    deletingId,
     duplicatingQuoteId,
     editingAP?.id,
     editingQuote?.id,
+    handleDeleteDocument,
     handleDuplicateQuote,
     handleEditAP,
     handleEditPO,
@@ -2337,6 +2593,7 @@ function App() {
     handleOpenNcfDialog,
     handleOpenQuoteAttachmentsDialog,
     handlePreviewDocument,
+    handleRestoreDocument,
     handleUndoConvertedInvoice,
     invoiceGeneratingId,
     isAccountsPayableSection,
@@ -2344,9 +2601,11 @@ function App() {
     isPurchaseOrdersSection,
     isQuotesSection,
     previewingId,
+    restoringId,
     translate,
     undoingQuoteId,
     updatingNcfId,
+    viewingTrash,
   ])
 
   const handleSort = useCallback((columnKey) => {
@@ -2578,27 +2837,60 @@ function App() {
 
       {!isNcfSequencesSection ? (
       <section className="section-content">
-        <div className={`section-intro ${isQuotesSection ? 'section-intro--with-action' : ''}`}>
+        <div className={`section-intro ${(isQuotesSection || isInvoicesSection) ? 'section-intro--with-action' : ''}`}>
           <div className="section-intro__copy">
             <h2>{config.title}</h2>
             <p>{config.description}</p>
           </div>
-          {isQuotesSection ? (
-            <button
-              type="button"
-              className="button button--compact button--icon-text"
-              onClick={isEditingQuote ? handleResumeEdit : handleOpenQuoteModal}
-            >
-              <UiIcon className="ui-icon ui-icon--button">
-                <path d="M10 4v12" />
-                <path d="M4 10h12" />
-              </UiIcon>
-              {isEditingQuote
-                ? translate('invoiceForm.resumeEdit')
-                : translate('invoiceForm.openModal')}
-            </button>
-          ) : null}
+          <div className="section-intro__actions">
+            {isQuotesSection && !viewingTrash ? (
+              <button
+                type="button"
+                className="button button--compact button--icon-text"
+                onClick={isEditingQuote ? handleResumeEdit : handleOpenQuoteModal}
+              >
+                <UiIcon className="ui-icon ui-icon--button">
+                  <path d="M10 4v12" />
+                  <path d="M4 10h12" />
+                </UiIcon>
+                {isEditingQuote
+                  ? translate('invoiceForm.resumeEdit')
+                  : translate('invoiceForm.openModal')}
+              </button>
+            ) : null}
+            {isInvoicesSection && !viewingTrash ? (
+              <button
+                type="button"
+                className="button button--compact button--icon-text"
+                onClick={handleOpenInvoiceModal}
+              >
+                <UiIcon className="ui-icon ui-icon--button">
+                  <path d="M10 4v12" />
+                  <path d="M4 10h12" />
+                </UiIcon>
+                {translate('sections.invoices.newInvoice')}
+              </button>
+            ) : null}
+            {canDelete && supportsTrash ? (
+              <button
+                type="button"
+                className="button button--secondary button--compact button--icon-text"
+                onClick={handleToggleTrash}
+              >
+                <UiIcon className="ui-icon ui-icon--button">
+                  <path d="M4 6h12" />
+                  <path d="M6 6V4.8A1.2 1.2 0 0 1 7.2 3.6h5.6A1.2 1.2 0 0 1 14 4.8V6" />
+                  <path d="M6 6v9.2A1.2 1.2 0 0 0 7.2 16.4h5.6A1.2 1.2 0 0 0 14 15.2V6" />
+                </UiIcon>
+                {viewingTrash ? translate('documentList.viewActive') : translate('documentList.viewTrash')}
+              </button>
+            ) : null}
+          </div>
         </div>
+
+        {viewingTrash ? (
+          <p className="muted trash-hint">{translate('documentList.trashHint')}</p>
+        ) : null}
 
         <div className="filter-bar" role="search">
           <div className="filter-bar__grid">
@@ -2720,7 +3012,7 @@ function App() {
             {error}
           </div>
         ) : currentDocuments.length === 0 ? (
-          <p className="muted">{config.empty}</p>
+          <p className="muted">{viewingTrash ? translate('documentList.trashEmpty') : config.empty}</p>
         ) : (
           <DocumentList
             documents={paginatedDocuments}
@@ -2877,6 +3169,25 @@ function App() {
             initialInvoice={editingQuote}
             mode={isEditingQuote ? 'edit' : 'create'}
             onCancelEdit={isEditingQuote ? handleCancelEdit : undefined}
+            customers={customers}
+          />
+        </Modal>
+      ) : null}
+      {isInvoicesSection ? (
+        <Modal
+          isOpen={isInvoiceModalOpen}
+          onClose={handleCloseInvoiceModal}
+          title={translate('sections.invoices.createHeading')}
+          description={translate('sections.invoices.createDescription')}
+          eyebrow={config.title}
+        >
+          <InvoiceForm
+            onSubmit={handleInvoiceSubmit}
+            isSubmitting={isSubmitting}
+            t={translate}
+            defaultCurrency={defaultCurrency}
+            locale={locale}
+            mode="create"
             customers={customers}
           />
         </Modal>

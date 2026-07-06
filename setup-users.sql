@@ -34,16 +34,16 @@ ELSE
 -- 2. Seed default users
 --
 -- Default credentials (change after first login!):
---   admin@ior.com    /  Admin1234!
---   manager@ior.com  /  Manager1234!
---   user@ior.com     /  User1234!
+--   pavelarias@papavelag.com    /  Admin1234!
+--   paularias@papavelag.com  /  Manager1234!
+--   annelfurcal@papavelag.com     /  User1234!
 -- ============================================================
 
-IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = 'admin@ior.com')
+IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = 'pavelarias@papavelag.com')
 BEGIN
     INSERT INTO Users (Id, Email, PasswordHash, Role, Name, CreatedAt) VALUES (
         NEWID(),
-        'admin@ior.com',
+        'pavelarias@papavelag.com',
         '$2b$11$1mim7cF36qGlLESuHjoHC.tASf/cWCzYYqHHIa4WrOiUoJVGGSaC.',
         'Admin',
         'Administrador',
@@ -52,11 +52,11 @@ BEGIN
     PRINT 'Admin user inserted.';
 END
 
-IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = 'manager@ior.com')
+IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = 'paularias@papavelag.com')
 BEGIN
     INSERT INTO Users (Id, Email, PasswordHash, Role, Name, CreatedAt) VALUES (
         NEWID(),
-        'manager@ior.com',
+        'paularias@papavelag.com',
         '$2b$11$bhaxG2xK7F6TPSsU9RJeseQHp0SDp8vlNpRN0BAZW3D9oN.KaJgG2',
         'Manager',
         'Gerente',
@@ -65,11 +65,11 @@ BEGIN
     PRINT 'Manager user inserted.';
 END
 
-IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = 'user@ior.com')
+IF NOT EXISTS (SELECT 1 FROM Users WHERE Email = 'annelfurcal@papavelag.com')
 BEGIN
     INSERT INTO Users (Id, Email, PasswordHash, Role, Name, CreatedAt) VALUES (
         NEWID(),
-        'user@ior.com',
+        'annelfurcal@papavelag.com',
         '$2b$11$rlc8m.S8zRMuoaguSE3KHODqsE6qtncqEw0hwVaObv.7bt64y8L76',
         'User',
         'Usuario',
