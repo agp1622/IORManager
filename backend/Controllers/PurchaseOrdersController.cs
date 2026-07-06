@@ -18,6 +18,9 @@ public class PurchaseOrdersController : ControllerBase
 
     private const long MaxAttachmentBytes = 20 * 1024 * 1024; // 20 MB
 
+    /// <summary>Valid internal-order workflow statuses, in progression order.</summary>
+    private static readonly string[] ValidStatuses = { "Pendiente", "EnProceso", "Completada" };
+
     public PurchaseOrdersController(
         IFinancialDocumentRepository<PurchaseOrder> repository,
         IFinancialDocumentPdfService pdfService,
@@ -91,6 +94,36 @@ public class PurchaseOrdersController : ControllerBase
         }
 
         po.RecalculateTotal();
+        _context.SaveChanges();
+
+        return Ok(po);
+    }
+
+    /// <summary>
+    /// Transitions the internal order's workflow status (Pendiente → EnProceso → Completada). Marking a PO
+    /// "Completada" is what surfaces the "send invoice" alert for its linked quote, if that quote hasn't been
+    /// converted to an invoice yet.
+    /// </summary>
+    [HttpPost("{id:guid}/status")]
+    public ActionResult<PurchaseOrder> UpdatePurchaseOrderStatus(Guid id, [FromBody] PurchaseOrderStatusUpdateRequest? request)
+    {
+        var status = request?.Status?.Trim();
+        if (string.IsNullOrWhiteSpace(status) || !ValidStatuses.Contains(status, StringComparer.OrdinalIgnoreCase))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid status",
+                Detail = $"Status must be one of: {string.Join(", ", ValidStatuses)}.",
+            });
+        }
+
+        var po = _context.PurchaseOrders.FirstOrDefault(existing => existing.Id == id);
+        if (po is null)
+        {
+            return NotFound();
+        }
+
+        po.Status = ValidStatuses.First(valid => string.Equals(valid, status, StringComparison.OrdinalIgnoreCase));
         _context.SaveChanges();
 
         return Ok(po);
@@ -219,3 +252,5 @@ public class PurchaseOrdersController : ControllerBase
         return NoContent();
     }
 }
+
+public record PurchaseOrderStatusUpdateRequest(string Status);

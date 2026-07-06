@@ -4,6 +4,7 @@ using IORManager.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace IORManager.Migrations
 {
     [DbContext(typeof(IORManagerContext))]
-    partial class IORManagerContextModelSnapshot : ModelSnapshot
+    [Migration("20260706065240_AddPaidStatusToInvoices")]
+    partial class AddPaidStatusToInvoices
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -590,9 +593,6 @@ namespace IORManager.Migrations
                     b.Property<Guid?>("QuoteId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<DateTime?>("SentAt")
-                        .HasColumnType("datetime2");
-
                     b.HasIndex("CustomerId");
 
                     b.HasIndex("FiscalRegimeId");
@@ -619,20 +619,12 @@ namespace IORManager.Migrations
                     b.Property<Guid?>("QuoteId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
                     b.HasIndex("QuoteId");
 
                     b.ToTable("FinancialDocument", t =>
                         {
                             t.Property("QuoteId")
                                 .HasColumnName("PurchaseOrder_QuoteId");
-
-                            t.Property("Status")
-                                .HasColumnName("PurchaseOrder_Status");
                         });
 
                     b.HasDiscriminator().HasValue("PurchaseOrder");

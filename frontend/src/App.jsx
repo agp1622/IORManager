@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth, apiFetch } from './contexts/AuthContext'
 import InvoiceForm from './components/InvoiceForm'
+import Insights from './components/Insights'
 import ReceiptForm from './components/ReceiptForm'
 import PurchaseOrderForm from './components/PurchaseOrderForm'
 import AccountPayableForm from './components/AccountPayableForm'
 import Modal from './components/Modal'
+import ThemedSelect from './components/ThemedSelect'
 import './App.css'
 import { createTranslator, LANGUAGES } from './i18n'
 import PapavelagLogo from './assets/papavelag-logo.svg'
@@ -154,6 +156,16 @@ const createSectionConfig = (t) => ({
     title: 'Secuencias NCF',
     // No endpoint — data comes from fiscalRegimes loaded separately
   },
+  insights: {
+    title: t('sections.insights.title'),
+    description: t('sections.insights.description'),
+    // No endpoint — data comes from the dedicated /Insights endpoint, fetched by the Insights component itself.
+  },
+  alerts: {
+    title: t('sections.alerts.title'),
+    description: t('sections.alerts.description'),
+    // No endpoint — data comes from the /Alerts endpoint, already polled into the `alerts` state above.
+  },
 })
 
 const DocumentList = ({
@@ -168,10 +180,15 @@ const DocumentList = ({
   sortConfig,
   onSort,
   pagination,
+  selectable = false,
+  selectedIds = null,
+  onToggleSelect,
+  onToggleSelectAll,
 }) => {
   const isQuoteList = config?.endpoint === 'Quotes'
   const isInvoiceList = config?.endpoint === 'Invoices'
   const isAccountsPayableList = config?.endpoint === 'AccountsPayable'
+  const isPurchaseOrderList = config?.endpoint === 'PurchaseOrders'
   const [openActionsId, setOpenActionsId] = useState(null)
   const [menuPosition, setMenuPosition] = useState(null)
   const actionButtonRefs = useRef({})
@@ -189,12 +206,26 @@ const DocumentList = ({
 
     const rect = button.getBoundingClientRect()
     const estimatedMenuHeight = 260
+    const estimatedMenuWidth = 220
+    const viewportMargin = 8
+
     const openUpward = rect.bottom + estimatedMenuHeight > window.innerHeight && rect.top > estimatedMenuHeight
+
+    // Prefer opening rightward (menu's left edge flush with the button's left
+    // edge) — that's the natural direction and the only one that works when
+    // the button sits near the left side of its row, e.g. the mobile card
+    // layout where the actions button is left-aligned. Only fall back to
+    // opening leftward (menu's right edge flush with the button) when there
+    // isn't enough room to the right, such as a right-aligned desktop table
+    // column near the edge of the screen.
+    const openRightward = rect.left + estimatedMenuWidth + viewportMargin <= window.innerWidth
 
     setMenuPosition({
       top: openUpward ? rect.top : rect.bottom,
-      right: Math.max(8, window.innerWidth - rect.right),
       openUpward,
+      openRightward,
+      left: openRightward ? Math.max(viewportMargin, rect.left) : undefined,
+      right: openRightward ? undefined : Math.max(viewportMargin, window.innerWidth - rect.right),
     })
   }, [])
 
@@ -296,6 +327,23 @@ const DocumentList = ({
       <table className="document-table">
         <thead>
           <tr>
+            {selectable ? (
+              <th scope="col" className="document-table__select-col">
+                <input
+                  type="checkbox"
+                  aria-label={t('documentList.selectAll')}
+                  checked={documents.length > 0 && documents.every((doc) => selectedIds?.has(doc.id))}
+                  ref={(node) => {
+                    if (node) {
+                      const someSelected = documents.some((doc) => selectedIds?.has(doc.id))
+                      const allSelected = documents.length > 0 && documents.every((doc) => selectedIds?.has(doc.id))
+                      node.indeterminate = someSelected && !allSelected
+                    }
+                  }}
+                  onChange={(event) => onToggleSelectAll?.(documents.map((doc) => doc.id), event.target.checked)}
+                />
+              </th>
+            ) : null}
             <th scope="col" aria-sort={getAriaSort('number')}>
               {renderSortButton(t('documentList.number'), 'number')}
             </th>
@@ -359,8 +407,42 @@ const DocumentList = ({
             const ncfNumber = document.ncfNumber
             const quoteNumber = document.quoteNumber || '—'
 
+            const isPaid = Boolean(document.paidAt || document.isPaid)
+            const isSent = Boolean(document.sentAt || document.isSent)
+            const paymentDueDate = document.paymentDueDate ? new Date(document.paymentDueDate) : null
+            const isPaymentDue =
+              Boolean(document.isPaymentDue) ||
+              (!isPaid && isSent && paymentDueDate && paymentDueDate.getTime() <= Date.now())
+            const invoicePillState = isPaid ? 'paid' : isPaymentDue ? 'paymentDue' : isSent ? 'sent' : 'unpaid'
+            const invoicePillLabel = {
+              paid: t('documentList.paidLabel'),
+              paymentDue: t('documentList.paymentDueLabel'),
+              sent: t('documentList.sentLabel'),
+              unpaid: t('documentList.unpaidLabel'),
+            }[invoicePillState]
+            const invoicePillClass = {
+              paid: 'pill--success',
+              paymentDue: 'pill--error',
+              sent: 'pill--info',
+              unpaid: 'pill--warning',
+            }[invoicePillState]
+            const poStatus = document.status || 'Pendiente'
+            const poStatusClass =
+              poStatus === 'Completada' ? 'pill--success' : poStatus === 'EnProceso' ? 'pill--info' : 'pill--warning'
+            const poStatusLabel = t(`purchaseOrderForm.status${poStatus}`)
+
             return (
               <tr key={document.id}>
+                {selectable ? (
+                  <td className="document-table__select-col" data-heading={t('documentList.selectRow')}>
+                    <input
+                      type="checkbox"
+                      aria-label={t('documentList.selectRow')}
+                      checked={Boolean(selectedIds?.has(document.id))}
+                      onChange={() => onToggleSelect?.(document.id)}
+                    />
+                  </td>
+                ) : null}
                 <td data-heading={t('documentList.number')}>
                   <div className="document-number">
                     <span>{document.number}</span>
@@ -371,6 +453,12 @@ const DocumentList = ({
                       <span className="pill pill--muted">
                         {ncfNumber}
                       </span>
+                    ) : null}
+                    {isInvoiceList ? (
+                      <span className={`pill ${invoicePillClass}`}>{invoicePillLabel}</span>
+                    ) : null}
+                    {isPurchaseOrderList ? (
+                      <span className={`pill ${poStatusClass}`}>{poStatusLabel}</span>
                     ) : null}
                   </div>
                 </td>
@@ -468,7 +556,9 @@ const DocumentList = ({
                           aria-label={t('documentList.actions')}
                           style={{
                             position: 'fixed',
-                            right: menuPosition.right,
+                            ...(menuPosition.openRightward
+                              ? { left: menuPosition.left }
+                              : { right: menuPosition.right }),
                             ...(menuPosition.openUpward
                               ? { bottom: window.innerHeight - menuPosition.top }
                               : { top: menuPosition.top }),
@@ -599,6 +689,17 @@ function App() {
   const [trashDocuments, setTrashDocuments] = useState({ quotes: [], invoices: [] })
   const [deletingId, setDeletingId] = useState(null)
   const [restoringId, setRestoringId] = useState(null)
+  const [markingPaidId, setMarkingPaidId] = useState(null)
+  const [markingUnpaidId, setMarkingUnpaidId] = useState(null)
+  const [markingSentId, setMarkingSentId] = useState(null)
+  const [markingUnsentId, setMarkingUnsentId] = useState(null)
+  const [markingPoStatusId, setMarkingPoStatusId] = useState(null)
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(() => new Set())
+  const [isDownloadingSelectedPdf, setIsDownloadingSelectedPdf] = useState(false)
+  const [isDownloadingSelectedZip, setIsDownloadingSelectedZip] = useState(false)
+  const [paidFilter, setPaidFilter] = useState('all')
+  const [alerts, setAlerts] = useState([])
+  const [isAlertsBellOpen, setIsAlertsBellOpen] = useState(false)
   const [attachmentsDialog, setAttachmentsDialog] = useState({
     isOpen: false,
     documentId: null,
@@ -621,6 +722,8 @@ function App() {
   })
   const previewUrlRef = useRef(null)
   const [previewingId, setPreviewingId] = useState(null)
+  const alertsBellRef = useRef(null)
+  const [alertsMenuPosition, setAlertsMenuPosition] = useState(null)
   const [ncfDialog, setNcfDialog] = useState({
     isOpen: false,
     mode: 'generate',
@@ -830,9 +933,74 @@ function App() {
     }
   }, [])
 
+  const loadAlerts = useCallback(async () => {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/Alerts`)
+      if (!response.ok) return
+      const data = await response.json()
+      if (Array.isArray(data)) setAlerts(data)
+    } catch {
+      // Alerts are a convenience layer — keep the rest of the app working without them.
+    }
+  }, [])
+
   useEffect(() => {
     loadCustomers()
   }, [loadCustomers])
+
+  useEffect(() => {
+    loadAlerts()
+    const intervalId = window.setInterval(loadAlerts, 60000)
+    return () => window.clearInterval(intervalId)
+  }, [loadAlerts])
+
+  const toggleAlertsBell = useCallback(() => {
+    setIsAlertsBellOpen((current) => {
+      const next = !current
+      if (next) {
+        const button = alertsBellRef.current
+        if (button) {
+          const rect = button.getBoundingClientRect()
+          const viewportMargin = 8
+          setAlertsMenuPosition({
+            top: rect.bottom,
+            right: Math.max(viewportMargin, window.innerWidth - rect.right),
+          })
+        }
+      }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!isAlertsBellOpen) {
+      return undefined
+    }
+
+    const handleMouseDown = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        return
+      }
+      if (target.closest('.alerts-bell') || target.closest('.alerts-bell-menu')) {
+        return
+      }
+      setIsAlertsBellOpen(false)
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsAlertsBellOpen(false)
+      }
+    }
+
+    window.document.addEventListener('mousedown', handleMouseDown)
+    window.document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.document.removeEventListener('mousedown', handleMouseDown)
+      window.document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isAlertsBellOpen])
 
   useEffect(() => {
     loadFiscalRegimes()
@@ -879,6 +1047,11 @@ function App() {
   useEffect(() => {
     setFilters({ search: '', client: '', number: '', date: '', ncf: '' })
   }, [activeSection])
+
+  useEffect(() => {
+    setSelectedInvoiceIds(new Set())
+    setPaidFilter('all')
+  }, [activeSection, viewingTrash])
 
   useEffect(() => {
     if (activeSection !== 'quotes') {
@@ -1028,11 +1201,19 @@ function App() {
       return parsed.toISOString().slice(0, 10)
     }
 
+    const appliesPaidFilter = activeSection === 'invoices' && !viewingTrash && paidFilter !== 'all'
+    const paidFiltered = appliesPaidFilter
+      ? source.filter((document) => {
+          const isPaid = Boolean(document.paidAt || document.isPaid)
+          return paidFilter === 'paid' ? isPaid : !isPaid
+        })
+      : source
+
     if (!searchTerm && !clientTerm && !numberTerm && !dateTerm && !ncfTerm) {
-      return source
+      return paidFiltered
     }
 
-    return source.filter((document) => {
+    return paidFiltered.filter((document) => {
       const partyName =
         document.partyName || document.customerName || document.supplierName || ''
       const partyLower = partyName.toLowerCase()
@@ -1081,7 +1262,7 @@ function App() {
 
       return matchesClient && matchesNumber && matchesDate && matchesNcf && matchesSearch
     })
-  }, [documents, trashDocuments, viewingTrash, activeSection, filters])
+  }, [documents, trashDocuments, viewingTrash, activeSection, filters, paidFilter])
 
   const sortedDocuments = useMemo(() => {
     const docs = [...filteredDocuments]
@@ -1163,6 +1344,8 @@ function App() {
   const isPurchaseOrdersSection = activeSection === 'purchaseOrders'
   const isAccountsPayableSection = activeSection === 'accountsPayable'
   const isNcfSequencesSection = activeSection === 'ncfSequences'
+  const isInsightsSection = activeSection === 'insights'
+  const isAlertsSection = activeSection === 'alerts'
   const isEditingQuote = isQuotesSection && Boolean(editingQuote)
   const brandNote =
     BRAND_NOTES[activeSection] ??
@@ -1451,6 +1634,316 @@ function App() {
     setViewingTrash((current) => !current)
     setStatus(null)
   }, [])
+
+  // ── Paid / Unpaid status ────────────────────────────────────────────────
+
+  const handleMarkInvoicePaid = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setMarkingPaidId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/mark-paid`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.markPaidError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.markPaidError'),
+        })
+      } finally {
+        setMarkingPaidId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handleMarkInvoiceUnpaid = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setMarkingUnpaidId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/mark-unpaid`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.markUnpaidError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.markUnpaidError'),
+        })
+      } finally {
+        setMarkingUnpaidId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handlePaidFilterChange = useCallback((value) => {
+    setPaidFilter(value)
+  }, [])
+
+  const handleGoToAlert = useCallback((alert) => {
+    const targetSection =
+      alert.documentType === 'Quote'
+        ? 'quotes'
+        : alert.documentType === 'Invoice'
+          ? 'invoices'
+          : alert.documentType === 'PurchaseOrder'
+            ? 'purchaseOrders'
+            : null
+
+    if (!targetSection) {
+      return
+    }
+
+    setActiveSection(targetSection)
+    setFilters((current) => ({ ...current, search: alert.documentNumber || '' }))
+    setIsAlertsBellOpen(false)
+  }, [])
+
+  const handleMarkInvoiceSent = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setMarkingSentId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/mark-sent`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.markSentError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.markSentError'),
+        })
+      } finally {
+        setMarkingSentId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handleMarkInvoiceUnsent = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setMarkingUnsentId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/mark-unsent`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.markUnsentError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.markUnsentError'),
+        })
+      } finally {
+        setMarkingUnsentId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handleUpdatePurchaseOrderStatus = useCallback(
+    async (doc, nextStatus) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setMarkingPoStatusId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${doc.id}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: nextStatus }),
+        })
+
+        if (!response.ok) {
+          let detail = translate('purchaseOrderForm.markStatusError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+        await loadAlerts()
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('purchaseOrderForm.markStatusError'),
+        })
+      } finally {
+        setMarkingPoStatusId(null)
+      }
+    },
+    [activeSection, loadAlerts, loadSection, translate],
+  )
+
+  // ── Bulk selection + batch download (invoices only) ─────────────────────
+
+  const handleToggleSelectInvoice = useCallback((documentId) => {
+    setSelectedInvoiceIds((current) => {
+      const next = new Set(current)
+      if (next.has(documentId)) {
+        next.delete(documentId)
+      } else {
+        next.add(documentId)
+      }
+      return next
+    })
+  }, [])
+
+  const handleToggleSelectAllInvoices = useCallback((ids, shouldSelect) => {
+    setSelectedInvoiceIds((current) => {
+      const next = new Set(current)
+      ids.forEach((id) => {
+        if (shouldSelect) {
+          next.add(id)
+        } else {
+          next.delete(id)
+        }
+      })
+      return next
+    })
+  }, [])
+
+  const downloadBlobResponse = useCallback(async (response, fallbackFileName) => {
+    const disposition = response.headers.get('content-disposition') || ''
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+    const fileName = match ? decodeURIComponent(match[1]) : fallbackFileName
+
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const link = window.document.createElement('a')
+    link.href = url
+    link.download = fileName
+    window.document.body.appendChild(link)
+    link.click()
+    window.document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  }, [])
+
+  const handleDownloadSelectedPdf = useCallback(async () => {
+    const ids = Array.from(selectedInvoiceIds)
+    if (ids.length === 0) {
+      return
+    }
+
+    try {
+      setIsDownloadingSelectedPdf(true)
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/batch-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+
+      if (!response.ok) {
+        throw new Error(translate('documentList.bulkDownloadError'))
+      }
+
+      await downloadBlobResponse(response, 'invoices.pdf')
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error.message || translate('documentList.bulkDownloadError'),
+      })
+    } finally {
+      setIsDownloadingSelectedPdf(false)
+    }
+  }, [downloadBlobResponse, selectedInvoiceIds, translate])
+
+  const handleDownloadSelectedZip = useCallback(async () => {
+    const ids = Array.from(selectedInvoiceIds)
+    if (ids.length === 0) {
+      return
+    }
+
+    try {
+      setIsDownloadingSelectedZip(true)
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/batch-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+
+      if (!response.ok) {
+        throw new Error(translate('documentList.bulkDownloadError'))
+      }
+
+      await downloadBlobResponse(response, 'invoices.zip')
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error.message || translate('documentList.bulkDownloadError'),
+      })
+    } finally {
+      setIsDownloadingSelectedZip(false)
+    }
+  }, [downloadBlobResponse, selectedInvoiceIds, translate])
 
   const handleQuoteSubmit = useCallback(
     async (payload) => {
@@ -2523,6 +3016,38 @@ function App() {
           },
           variant: 'button--ghost',
         },
+        {
+          label: translate('documentList.markPaid'),
+          loadingLabel: translate('documentList.markingPaid'),
+          busyId: markingPaidId,
+          isVisible: (doc) => !(doc?.paidAt || doc?.isPaid),
+          onClick: handleMarkInvoicePaid,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('documentList.markUnpaid'),
+          loadingLabel: translate('documentList.markingUnpaid'),
+          busyId: markingUnpaidId,
+          isVisible: (doc) => Boolean(doc?.paidAt || doc?.isPaid),
+          onClick: handleMarkInvoiceUnpaid,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('documentList.markSent'),
+          loadingLabel: translate('documentList.markingSent'),
+          busyId: markingSentId,
+          isVisible: (doc) => !(doc?.sentAt || doc?.isSent),
+          onClick: handleMarkInvoiceSent,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('documentList.markUnsent'),
+          loadingLabel: translate('documentList.markingUnsent'),
+          busyId: markingUnsentId,
+          isVisible: (doc) => Boolean(doc?.sentAt || doc?.isSent),
+          onClick: handleMarkInvoiceUnsent,
+          variant: 'button--ghost',
+        },
         ...(canDelete ? [{
           label: translate('documentList.delete'),
           loadingLabel: translate('documentList.deleting'),
@@ -2548,6 +3073,22 @@ function App() {
           loadingLabel: translate('purchaseOrderForm.editAction'),
           busyId: null,
           onClick: handleEditPO,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('purchaseOrderForm.markInProgressAction'),
+          loadingLabel: translate('purchaseOrderForm.markInProgressLoading'),
+          busyId: markingPoStatusId,
+          isVisible: (doc) => (doc?.status || 'Pendiente') === 'Pendiente',
+          onClick: (doc) => handleUpdatePurchaseOrderStatus(doc, 'EnProceso'),
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('purchaseOrderForm.markCompletedAction'),
+          loadingLabel: translate('purchaseOrderForm.markCompletedLoading'),
+          busyId: markingPoStatusId,
+          isVisible: (doc) => (doc?.status || 'Pendiente') !== 'Completada',
+          onClick: (doc) => handleUpdatePurchaseOrderStatus(doc, 'Completada'),
           variant: 'button--ghost',
         },
       ]
@@ -2589,6 +3130,11 @@ function App() {
     handleGenerateInvoice,
     handleLogExpense,
     handleMarkAPPaid,
+    handleMarkInvoicePaid,
+    handleMarkInvoiceUnpaid,
+    handleMarkInvoiceSent,
+    handleMarkInvoiceUnsent,
+    handleUpdatePurchaseOrderStatus,
     handleOpenAttachmentsDialog,
     handleOpenNcfDialog,
     handleOpenQuoteAttachmentsDialog,
@@ -2600,6 +3146,11 @@ function App() {
     isInvoicesSection,
     isPurchaseOrdersSection,
     isQuotesSection,
+    markingPaidId,
+    markingUnpaidId,
+    markingSentId,
+    markingUnsentId,
+    markingPoStatusId,
     previewingId,
     restoringId,
     translate,
@@ -2721,6 +3272,70 @@ function App() {
           <span className="top-nav__title">{translate('app.title')}</span>
         </div>
         <div className="top-nav__controls">
+          <div className="alerts-bell">
+            <button
+              type="button"
+              ref={alertsBellRef}
+              className="alerts-bell__trigger"
+              onClick={toggleAlertsBell}
+              aria-haspopup="menu"
+              aria-expanded={isAlertsBellOpen}
+              aria-label={translate('alerts.bellLabel')}
+              title={translate('alerts.bellLabel')}
+            >
+              <UiIcon className="ui-icon">
+                <path d="M10 3.5a4 4 0 0 0-4 4v2.2c0 .6-.2 1.2-.6 1.7l-1 1.3a1 1 0 0 0 .8 1.6h9.6a1 1 0 0 0 .8-1.6l-1-1.3a2.8 2.8 0 0 1-.6-1.7V7.5a4 4 0 0 0-4-4z" />
+                <path d="M8.3 15.5a1.7 1.7 0 0 0 3.4 0" />
+              </UiIcon>
+              {alerts.length > 0 ? (
+                <span className="alerts-bell__badge">{alerts.length > 9 ? '9+' : alerts.length}</span>
+              ) : null}
+            </button>
+
+            {isAlertsBellOpen && alertsMenuPosition
+              ? createPortal(
+                  <div
+                    className="alerts-bell-menu"
+                    role="menu"
+                    aria-label={translate('alerts.bellLabel')}
+                    style={{
+                      position: 'fixed',
+                      top: alertsMenuPosition.top,
+                      right: alertsMenuPosition.right,
+                    }}
+                  >
+                    {alerts.length === 0 ? (
+                      <p className="alerts-bell-menu__empty">{translate('alerts.empty')}</p>
+                    ) : (
+                      alerts.map((alert) => (
+                        <button
+                          key={alert.id}
+                          type="button"
+                          className="alerts-bell-menu__item"
+                          onClick={() => handleGoToAlert(alert)}
+                        >
+                          <span className={`pill ${alert.severity === 'error' ? 'pill--error' : 'pill--warning'}`}>
+                            {alert.type === 'SendInvoice' ? translate('alerts.typeSendInvoice') : translate('alerts.typePaymentDue')}
+                          </span>
+                          <span>{alert.message}</span>
+                        </button>
+                      ))
+                    )}
+                    <button
+                      type="button"
+                      className="alerts-bell-menu__viewAll"
+                      onClick={() => {
+                        setActiveSection('alerts')
+                        setIsAlertsBellOpen(false)
+                      }}
+                    >
+                      {translate('alerts.viewAll')}
+                    </button>
+                  </div>,
+                  window.document.body,
+                )
+              : null}
+          </div>
           {user ? (
             <div className="top-nav__user">
               <span className="top-nav__user-name">{user.name}</span>
@@ -2736,33 +3351,33 @@ function App() {
           ) : null}
           <label className="toolbar__control">
             {translate('controls.language')}
-            <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-              {LANGUAGES.map((entry) => (
-                <option key={entry.value} value={entry.value}>
-                  {entry.label}
-                </option>
-              ))}
-            </select>
+            <ThemedSelect
+              value={language}
+              onChange={setLanguage}
+              ariaLabel={translate('controls.language')}
+              options={LANGUAGES.map((entry) => ({ value: entry.value, label: entry.label }))}
+            />
           </label>
           <label className="toolbar__control">
             {translate('controls.currency')}
-            <select
+            <ThemedSelect
               value={defaultCurrency}
-              onChange={(event) => setDefaultCurrency(event.target.value)}
-            >
-              {CURRENCY_CODES.map((code) => (
-                <option key={code} value={code}>
-                  {translate(`currencies.${code}`)}
-                </option>
-              ))}
-            </select>
+              onChange={setDefaultCurrency}
+              ariaLabel={translate('controls.currency')}
+              options={CURRENCY_CODES.map((code) => ({ value: code, label: translate(`currencies.${code}`) }))}
+            />
           </label>
           <label className="toolbar__control">
             {translate('controls.theme')}
-            <select value={theme} onChange={(event) => setTheme(event.target.value)}>
-              <option value="light">{translate('controls.themeLight')}</option>
-              <option value="dark">{translate('controls.themeDark')}</option>
-            </select>
+            <ThemedSelect
+              value={theme}
+              onChange={setTheme}
+              ariaLabel={translate('controls.theme')}
+              options={[
+                { value: 'light', label: translate('controls.themeLight') },
+                { value: 'dark', label: translate('controls.themeDark') },
+              ]}
+            />
           </label>
         </div>
       </header>
@@ -2835,7 +3450,57 @@ function App() {
         </section>
       ) : null}
 
-      {!isNcfSequencesSection ? (
+      {isInsightsSection ? (
+        <section className="section-content">
+          <div className="section-intro">
+            <h2>{config.title}</h2>
+            <p>{config.description}</p>
+          </div>
+          <Insights
+            apiBaseUrl={API_BASE_URL}
+            currency={defaultCurrency}
+            currencyOptions={CURRENCY_CODES}
+            onCurrencyChange={setDefaultCurrency}
+            t={translate}
+            formatCurrency={formatCurrency}
+            locale={locale}
+          />
+        </section>
+      ) : null}
+
+      {isAlertsSection ? (
+        <section className="section-content">
+          <div className="section-intro">
+            <h2>{config.title}</h2>
+            <p>{config.description}</p>
+          </div>
+          {alerts.length === 0 ? (
+            <p className="muted">{translate('alerts.empty')}</p>
+          ) : (
+            <ul className="alerts-list">
+              {alerts.map((alert) => (
+                <li key={alert.id} className={`alerts-list__item alerts-list__item--${alert.severity}`}>
+                  <div className="alerts-list__copy">
+                    <span className={`pill ${alert.severity === 'error' ? 'pill--error' : 'pill--warning'}`}>
+                      {alert.type === 'SendInvoice' ? translate('alerts.typeSendInvoice') : translate('alerts.typePaymentDue')}
+                    </span>
+                    <p>{alert.message}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => handleGoToAlert(alert)}
+                  >
+                    {translate('alerts.goToDocument')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {!isNcfSequencesSection && !isInsightsSection && !isAlertsSection ? (
       <section className="section-content">
         <div className={`section-intro ${(isQuotesSection || isInvoicesSection) ? 'section-intro--with-action' : ''}`}>
           <div className="section-intro__copy">
@@ -2985,6 +3650,27 @@ function App() {
                 placeholder={translate('filters.ncfPlaceholder')}
               />
             </label>
+            {isInvoicesSection && !viewingTrash ? (
+              <label>
+                <span className="field-label">
+                  <UiIcon>
+                    <circle cx="10" cy="10" r="7" />
+                    <path d="M7 10.5l2 2 4-4.5" />
+                  </UiIcon>
+                  <span>{translate('documentList.paidStatusLabel')}</span>
+                </span>
+                <ThemedSelect
+                  value={paidFilter}
+                  onChange={handlePaidFilterChange}
+                  ariaLabel={translate('documentList.paidStatusLabel')}
+                  options={[
+                    { value: 'all', label: translate('documentList.paidStatusAll') },
+                    { value: 'paid', label: translate('documentList.paidStatusPaid') },
+                    { value: 'unpaid', label: translate('documentList.paidStatusUnpaid') },
+                  ]}
+                />
+              </label>
+            ) : null}
           </div>
           <button
             type="button"
@@ -3004,6 +3690,34 @@ function App() {
             {status.message}
           </div>
         )}
+
+        {isInvoicesSection && !viewingTrash && selectedInvoiceIds.size > 0 ? (
+          <div className="bulk-actions">
+            <span className="bulk-actions__count">
+              {translate('documentList.selectedCount').replace('{{count}}', selectedInvoiceIds.size)}
+            </span>
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={handleDownloadSelectedPdf}
+              disabled={isDownloadingSelectedPdf}
+            >
+              {isDownloadingSelectedPdf
+                ? translate('documentList.downloadingSelectedPdf')
+                : translate('documentList.downloadSelectedPdf')}
+            </button>
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={handleDownloadSelectedZip}
+              disabled={isDownloadingSelectedZip}
+            >
+              {isDownloadingSelectedZip
+                ? translate('documentList.downloadingSelectedZip')
+                : translate('documentList.downloadSelectedZip')}
+            </button>
+          </div>
+        ) : null}
 
         {loading ? (
           <p className="muted">{config.loading}</p>
@@ -3026,12 +3740,16 @@ function App() {
             onSort={handleSort}
             extraActions={documentExtraActions}
             pagination={paginationConfig}
+            selectable={isInvoicesSection && !viewingTrash}
+            selectedIds={selectedInvoiceIds}
+            onToggleSelect={handleToggleSelectInvoice}
+            onToggleSelectAll={handleToggleSelectAllInvoices}
           />
         )}
       </section>
       ) : null}
 
-      {!isQuotesSection && !isNcfSequencesSection ? (
+      {!isQuotesSection && !isNcfSequencesSection && !isInsightsSection && !isAlertsSection ? (
         <section className="section-content">
           <div className="section-intro">
             <h2>{formHeading}</h2>
@@ -3375,21 +4093,20 @@ function App() {
             ) : null}
             <label className="modal-input" aria-disabled={ncfDialog.skipNcf || undefined}>
               {translate('invoiceForm.ncfCategoryLabel')}
-              <select
+              <ThemedSelect
                 value={ncfDialog.category}
-                onChange={(event) => {
+                onChange={(nextValue) => {
                   const nextCategory =
-                    normalizeNcfCategory(event.target.value, ncfCategories) || DEFAULT_NCF_CATEGORY
+                    normalizeNcfCategory(nextValue, ncfCategories) || DEFAULT_NCF_CATEGORY
                   void handleNcfCategoryChange(nextCategory)
                 }}
                 disabled={ncfDialog.isLoading || ncfDialog.skipNcf}
-              >
-                {ncfCategories.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.code} - {(option.name || '').trim() || translate(`ncfCategories.${option.code}`)}
-                  </option>
-                ))}
-              </select>
+                ariaLabel={translate('invoiceForm.ncfCategoryLabel')}
+                options={ncfCategories.map((option) => ({
+                  value: option.code,
+                  label: `${option.code} - ${(option.name || '').trim() || translate(`ncfCategories.${option.code}`)}`,
+                }))}
+              />
             </label>
             <p className="input-hint">{translate('invoiceForm.ncfCategoryHint')}</p>
             {lastNcfForCurrentCategory ? (

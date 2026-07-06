@@ -51,6 +51,30 @@ public class Invoice : FinancialDocument
     [NotMapped]
     public bool InvoiceGenerated => InvoiceGeneratedAt.HasValue;
 
+    /// <summary>When set, the customer has paid this invoice as of this UTC timestamp.</summary>
+    public DateTime? PaidAt { get; set; }
+
+    [NotMapped]
+    public bool IsPaid => PaidAt.HasValue;
+
+    /// <summary>When set, the invoice has been delivered/emailed to the customer as of this UTC timestamp.</summary>
+    public DateTime? SentAt { get; set; }
+
+    [NotMapped]
+    public bool IsSent => SentAt.HasValue;
+
+    /// <summary>Populated by the controller from the linked customer's payment terms; not persisted.</summary>
+    [NotMapped]
+    public int? CustomerPaymentTermsDays { get; set; }
+
+    /// <summary>The date payment is due: when the invoice was sent, plus the customer's payment terms.</summary>
+    [NotMapped]
+    public DateTime? PaymentDueDate => SentAt?.AddDays(CustomerPaymentTermsDays ?? 30);
+
+    /// <summary>True once the invoice has been sent, its due date has arrived, and it still hasn't been paid.</summary>
+    [NotMapped]
+    public bool IsPaymentDue => !IsPaid && PaymentDueDate.HasValue && PaymentDueDate.Value <= DateTime.UtcNow;
+
     [NotMapped]
     public DateOnly QuoteDate => Date;
 

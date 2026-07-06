@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import ThemedSelect from './ThemedSelect'
 
 const CURRENCY_CODES = ['USD', 'DOP']
 const AP_STATUSES = ['Pendiente', 'Pagado', 'Vencido']
@@ -185,18 +186,13 @@ const AccountPayableForm = ({
           <label className="document-form__label" htmlFor={`${formInstanceId}-currency`}>
             {t('accountPayableForm.currencyLabel')}
           </label>
-          <select
+          <ThemedSelect
             id={`${formInstanceId}-currency`}
-            className="document-form__input"
             value={currencyCode}
-            onChange={(e) => setCurrencyCode(e.target.value)}
-          >
-            {CURRENCY_CODES.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </select>
+            onChange={setCurrencyCode}
+            ariaLabel={t('accountPayableForm.currencyLabel')}
+            options={CURRENCY_CODES.map((code) => ({ value: code, label: code }))}
+          />
         </div>
 
         {/* Invoice date */}
@@ -234,18 +230,13 @@ const AccountPayableForm = ({
           <label className="document-form__label" htmlFor={`${formInstanceId}-status`}>
             {t('accountPayableForm.statusLabel')}
           </label>
-          <select
+          <ThemedSelect
             id={`${formInstanceId}-status`}
-            className="document-form__input"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            {AP_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {t(`accountPayableForm.status${s}`)}
-              </option>
-            ))}
-          </select>
+            onChange={setStatus}
+            ariaLabel={t('accountPayableForm.statusLabel')}
+            options={AP_STATUSES.map((s) => ({ value: s, label: t(`accountPayableForm.status${s}`) }))}
+          />
         </div>
       </div>
 

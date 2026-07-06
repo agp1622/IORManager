@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
+import ThemedSelect from './ThemedSelect'
 
 const createEmptyLine = (unitOfMeasure = 'unit') => ({
   description: '',
@@ -276,17 +277,12 @@ const InvoiceForm = ({
         </label>
         <label>
           {t('invoiceForm.currencyLabel')}
-          <select
+          <ThemedSelect
             value={currencyCode}
-            onChange={(event) => setCurrencyCode(event.target.value)}
-            required
-          >
-            {currencyOptions.map((code) => (
-              <option key={code} value={code}>
-                {t(`currencies.${code}`)}
-              </option>
-            ))}
-          </select>
+            onChange={setCurrencyCode}
+            ariaLabel={t('invoiceForm.currencyLabel')}
+            options={currencyOptions.map((code) => ({ value: code, label: t(`currencies.${code}`) }))}
+          />
         </label>
         <label>
           {t('invoiceForm.itbisLabel')}
@@ -391,19 +387,14 @@ const InvoiceForm = ({
                       <label className="sr-only" htmlFor={`${idPrefix}-unit`}>
                         {t('invoiceForm.unitOfMeasureLabel')}
                       </label>
-                      <select
+                      <ThemedSelect
                         id={`${idPrefix}-unit`}
                         value={line.unitOfMeasure}
-                        onChange={(event) => updateLine(index, 'unitOfMeasure', event.target.value)}
-                        required
+                        onChange={(nextValue) => updateLine(index, 'unitOfMeasure', nextValue)}
+                        ariaLabel={t('invoiceForm.unitOfMeasureLabel')}
                         className="line-table__input"
-                      >
-                        {unitOptions.map((code) => (
-                          <option key={code} value={code}>
-                            {t(`units.${code}`)}
-                          </option>
-                        ))}
-                      </select>
+                        options={unitOptions.map((code) => ({ value: code, label: t(`units.${code}`) }))}
+                      />
                     </td>
                     <td data-heading={t('invoiceForm.unitPriceLabel')}>
                       <label className="sr-only" htmlFor={`${idPrefix}-price`}>

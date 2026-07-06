@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Linq;
 using IORManager.Data;
 using IORManager.Dtos;
@@ -39,6 +40,7 @@ public class InvoicesController : ControllerBase
     {
         var invoices = _repository.GetAll().ToList();
         PopulateQuoteNumbers(invoices);
+        PopulateCustomerPaymentTerms(invoices);
         return Ok(invoices);
     }
 
@@ -52,6 +54,7 @@ public class InvoicesController : ControllerBase
         }
 
         PopulateQuoteNumbers([invoice]);
+        PopulateCustomerPaymentTerms([invoice]);
         return Ok(invoice);
     }
 
@@ -69,6 +72,7 @@ public class InvoicesController : ControllerBase
             .ToList();
 
         PopulateQuoteNumbers(invoices);
+        PopulateCustomerPaymentTerms(invoices);
         return Ok(invoices);
     }
 
@@ -116,6 +120,159 @@ public class InvoicesController : ControllerBase
         invoice.DeletedAt = null;
         _context.SaveChanges();
         return Ok(invoice);
+    }
+
+    /// <summary>Marks an invoice as paid by the customer.</summary>
+    [HttpPost("{id:guid}/mark-paid")]
+    public ActionResult<Invoice> MarkInvoicePaid(Guid id)
+    {
+        var invoice = _context.Invoices.FirstOrDefault(existing => existing.Id == id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        invoice.PaidAt ??= DateTime.UtcNow;
+        _context.SaveChanges();
+        return Ok(invoice);
+    }
+
+    /// <summary>Reverts an invoice back to unpaid — useful if it was marked paid by mistake.</summary>
+    [HttpPost("{id:guid}/mark-unpaid")]
+    public ActionResult<Invoice> MarkInvoiceUnpaid(Guid id)
+    {
+        var invoice = _context.Invoices.FirstOrDefault(existing => existing.Id == id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        invoice.PaidAt = null;
+        _context.SaveChanges();
+        return Ok(invoice);
+    }
+
+    /// <summary>
+    /// Marks an invoice as sent/delivered to the customer. This starts the payment-due countdown (sent date plus
+    /// the customer's payment terms), which is how the "payment due" alert is triggered later.
+    /// </summary>
+    [HttpPost("{id:guid}/mark-sent")]
+    public ActionResult<Invoice> MarkInvoiceSent(Guid id)
+    {
+        var invoice = _context.Invoices.FirstOrDefault(existing => existing.Id == id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        invoice.SentAt ??= DateTime.UtcNow;
+        _context.SaveChanges();
+
+        PopulateCustomerPaymentTerms([invoice]);
+        return Ok(invoice);
+    }
+
+    /// <summary>Reverts an invoice back to not-sent — useful if it was marked sent by mistake.</summary>
+    [HttpPost("{id:guid}/mark-unsent")]
+    public ActionResult<Invoice> MarkInvoiceUnsent(Guid id)
+    {
+        var invoice = _context.Invoices.FirstOrDefault(existing => existing.Id == id);
+        if (invoice is null)
+        {
+            return NotFound();
+        }
+
+        invoice.SentAt = null;
+        _context.SaveChanges();
+        return Ok(invoice);
+    }
+
+    /// <summary>Combines the selected invoices into a single downloadable PDF, one invoice per page.</summary>
+    [HttpPost("batch-pdf")]
+    public ActionResult DownloadInvoicesBatchPdf([FromBody] InvoiceBatchRequest request)
+    {
+        if (request?.Ids is null || request.Ids.Count == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "No invoices selected",
+                Detail = "Provide at least one invoice id.",
+            });
+        }
+
+        var invoices = _context.Invoices
+            .Include(invoice => invoice.Lines)
+            .Where(invoice => request.Ids.Contains(invoice.Id))
+            .ToList();
+
+        // Preserve the order the caller selected them in, rather than whatever order the DB returns.
+        var orderedInvoices = request.Ids
+            .Select(id => invoices.FirstOrDefault(invoice => invoice.Id == id))
+            .Where(invoice => invoice is not null)
+            .Select(invoice => invoice!)
+            .ToList();
+
+        if (orderedInvoices.Count == 0)
+        {
+            return NotFound();
+        }
+
+        var pdfBytes = _pdfService.GenerateInvoicesBatchPdf(orderedInvoices);
+        var fileName = orderedInvoices.Count == 1
+            ? $"Invoice-{DocumentNumberFormatter.ToInvoiceNumber(orderedInvoices[0].Number)}.pdf"
+            : $"Invoices-{DateTime.UtcNow:yyyyMMdd-HHmmss}.pdf";
+
+        return File(pdfBytes, "application/pdf", fileName);
+    }
+
+    /// <summary>Bundles the selected invoices as individual PDFs inside a single ZIP file.</summary>
+    [HttpPost("batch-zip")]
+    public ActionResult DownloadInvoicesBatchZip([FromBody] InvoiceBatchRequest request)
+    {
+        if (request?.Ids is null || request.Ids.Count == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "No invoices selected",
+                Detail = "Provide at least one invoice id.",
+            });
+        }
+
+        var invoices = _context.Invoices
+            .Include(invoice => invoice.Lines)
+            .Where(invoice => request.Ids.Contains(invoice.Id))
+            .ToList();
+
+        if (invoices.Count == 0)
+        {
+            return NotFound();
+        }
+
+        using var zipStream = new MemoryStream();
+        using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var invoice in invoices)
+            {
+                var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, invoice.NcfNumber);
+                var baseName = $"Invoice-{DocumentNumberFormatter.ToInvoiceNumber(invoice.Number)}";
+                var entryName = $"{baseName}.pdf";
+                var suffix = 2;
+                while (!usedNames.Add(entryName))
+                {
+                    entryName = $"{baseName}-{suffix}.pdf";
+                    suffix++;
+                }
+
+                var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+                using var entryStream = entry.Open();
+                entryStream.Write(pdfBytes, 0, pdfBytes.Length);
+            }
+        }
+
+        zipStream.Position = 0;
+        var zipFileName = $"Invoices-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip";
+        return File(zipStream.ToArray(), "application/zip", zipFileName);
     }
 
     [HttpGet("ncf-categories")]
@@ -423,6 +580,40 @@ public class InvoicesController : ControllerBase
             invoice.QuoteNumber = quoteNumbers.TryGetValue(invoice.QuoteId.Value, out var quoteNumber)
                 ? quoteNumber
                 : null;
+        }
+    }
+
+    /// <summary>
+    /// Populates each invoice's <see cref="Invoice.CustomerPaymentTermsDays"/> from its linked customer, so
+    /// <see cref="Invoice.PaymentDueDate"/> and <see cref="Invoice.IsPaymentDue"/> can be computed client-side
+    /// without a separate lookup. Mirrors the <see cref="PopulateQuoteNumbers"/> pattern above.
+    /// </summary>
+    private void PopulateCustomerPaymentTerms(IEnumerable<Invoice> invoices)
+    {
+        var invoiceList = invoices.ToList();
+        var customerIds = invoiceList
+            .Where(invoice => invoice.CustomerId.HasValue)
+            .Select(invoice => invoice.CustomerId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (customerIds.Count == 0)
+        {
+            return;
+        }
+
+        var paymentTerms = _context.Customers
+            .AsNoTracking()
+            .Where(customer => customerIds.Contains(customer.Id))
+            .Select(customer => new { customer.Id, customer.DefaultPaymentTermsDays })
+            .ToDictionary(customer => customer.Id, customer => customer.DefaultPaymentTermsDays);
+
+        foreach (var invoice in invoiceList)
+        {
+            if (invoice.CustomerId.HasValue && paymentTerms.TryGetValue(invoice.CustomerId.Value, out var days))
+            {
+                invoice.CustomerPaymentTermsDays = days;
+            }
         }
     }
 
@@ -737,3 +928,5 @@ public class InvoicesController : ControllerBase
         return true;
     }
 }
+
+public record InvoiceBatchRequest(IReadOnlyList<Guid> Ids);

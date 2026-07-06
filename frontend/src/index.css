@@ -8,6 +8,7 @@
   -moz-osx-font-smoothing: grayscale;
   color: #0f172a;
   background-color: #f4f6fb;
+  color-scheme: light;
 
   --text-strong: #0f172a;
   --text-muted: #52606d;
@@ -59,6 +60,7 @@
 :root[data-theme='dark'] {
   color: #f5f7ff;
   background-color: #01050f;
+  color-scheme: dark;
 
   --text-strong: #f7faff;
   --text-muted: #8fb2d6;

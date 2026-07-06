@@ -57,6 +57,100 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) =>
         GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber);
 
+    public byte[] GenerateInvoicesBatchPdf(IReadOnlyCollection<Invoice> invoices)
+    {
+        var doc = QuestPdfDocument.Create(document =>
+        {
+            foreach (var invoice in invoices)
+            {
+                ComposeInvoiceBatchPage(document, invoice);
+            }
+        });
+
+        using var ms = new MemoryStream();
+        doc.GeneratePdf(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Adds one invoice as a single page within a multi-invoice document. Mirrors
+    /// <see cref="GenerateInvoiceDocument"/> + <see cref="CreateDocument"/> for the non-quote case, but appends a
+    /// page to an already-open <see cref="QuestPdfDocument"/> instead of creating a standalone one — that's the
+    /// only way to combine several invoices into a single PDF file rather than one file per invoice.
+    /// </summary>
+    private static void ComposeInvoiceBatchPage(IDocumentContainer document, Invoice invoice)
+    {
+        var resources = GetInvoiceResources(invoice.CultureName, asQuote: false);
+        var culture = resources.Culture;
+        var currencyFormat = CreateCurrencyFormat(culture, invoice.CurrencyCode);
+        var documentNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
+        var invoiceTotals = GetInvoiceTotals(invoice);
+        var subtotalLabel = Localize(culture, "Invoice Subtotal", "Subtotal de factura");
+        var itbisRateLabel = Localize(culture, "ITBIS Rate", "Tasa ITBIS");
+        var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
+        var addressLabel = Localize(culture, "Address", "Dirección");
+        var contactLabel = Localize(culture, "Contact", "Contacto");
+
+        var metadata = new List<(string Label, string Value)>
+        {
+            (resources.NumberLabel, documentNumber),
+            (resources.DateLabel, invoice.InvoiceDate.ToString("d", culture)),
+            (resources.ExpirationLabel, invoice.InvoiceExpirationDate.ToString("d", culture)),
+            (resources.CustomerLabel, invoice.CustomerName),
+        };
+        if (!string.IsNullOrWhiteSpace(invoice.CustomerAddress))
+        {
+            metadata.Add((addressLabel, invoice.CustomerAddress));
+        }
+        if (!string.IsNullOrWhiteSpace(invoice.CustomerContact))
+        {
+            metadata.Add((contactLabel, invoice.CustomerContact));
+        }
+
+        var totals = new List<(string Label, string Value)>
+        {
+            (subtotalLabel, FormatCurrency(invoiceTotals.Subtotal, currencyFormat)),
+            (itbisRateLabel, FormatPercentage(invoiceTotals.Rate, culture)),
+            (itbisAmountLabel, FormatCurrency(invoiceTotals.ItbisAmount, currencyFormat)),
+            ($"{resources.TotalLabel.ToUpperInvariant()} ({currencyFormat.CurrencySymbol})", FormatCurrency(invoiceTotals.Total, currencyFormat)),
+        };
+
+        var footerNotes = GetFooterNotes(culture);
+
+        document.Page(page =>
+        {
+            page.Margin(36);
+            page.Size(PageSizes.A4);
+            page.PageColor(PageBackgroundColor);
+            page.DefaultTextStyle(
+                TextStyle.Default
+                    .FontFamily("Helvetica")
+                    .FontSize(10.5f)
+                    .FontColor(PrimaryTextColor));
+
+            page.Content().Column(column =>
+            {
+                column.Spacing(18);
+                column.Item().Element(header =>
+                    ComposeHeader(header, resources.TitleLabel.ToUpperInvariant(), metadata, invoice.NcfNumber, culture));
+                column.Item().Element(body =>
+                    ComposeContentCard(body, content => ComposeDocumentLines(
+                        content,
+                        invoice.Lines,
+                        currencyFormat,
+                        culture,
+                        Localize(culture, "Item #", "Ítem #"),
+                        resources.DescriptionLabel,
+                        resources.QuantityLabel,
+                        resources.UnitPriceLabel,
+                        Localize(culture, "Price", "Precio"))));
+                column.Item().Element(totalContainer => ComposeTotals(totalContainer, totals));
+            });
+
+            page.Footer().Element(footerContainer => ComposeFooterNotes(footerContainer, footerNotes));
+        });
+    }
+
     public byte[] GenerateInvoiceWord(Invoice invoice, string? ncfNumber = null)
     {
         var resources = GetInvoiceResources(invoice.CultureName, asQuote: false);

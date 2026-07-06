@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
+import ThemedSelect from './ThemedSelect'
 
 const createEmptyLine = (unitOfMeasure = 'unit') => ({
   description: '',
@@ -220,13 +221,12 @@ const PurchaseOrderForm = ({
         </label>
         <label>
           {t('purchaseOrderForm.currencyLabel')}
-          <select value={currencyCode} onChange={(event) => setCurrencyCode(event.target.value)}>
-            {CURRENCY_CODES.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </select>
+          <ThemedSelect
+            value={currencyCode}
+            onChange={setCurrencyCode}
+            ariaLabel={t('purchaseOrderForm.currencyLabel')}
+            options={CURRENCY_CODES.map((code) => ({ value: code, label: code }))}
+          />
         </label>
         {quotes.length > 0 ? (
           <label>
@@ -303,17 +303,12 @@ const PurchaseOrderForm = ({
             </label>
             <label>
               {t('purchaseOrderForm.unitOfMeasureLabel')}
-              <select
+              <ThemedSelect
                 value={line.unitOfMeasure}
-                onChange={(event) => updateLine(index, 'unitOfMeasure', event.target.value)}
-                required
-              >
-                {unitOptions.map((code) => (
-                  <option key={code} value={code}>
-                    {t(`units.${code}`)}
-                  </option>
-                ))}
-              </select>
+                onChange={(nextValue) => updateLine(index, 'unitOfMeasure', nextValue)}
+                ariaLabel={t('purchaseOrderForm.unitOfMeasureLabel')}
+                options={unitOptions.map((code) => ({ value: code, label: t(`units.${code}`) }))}
+              />
             </label>
             <label>
               {t('purchaseOrderForm.unitPriceLabel')}

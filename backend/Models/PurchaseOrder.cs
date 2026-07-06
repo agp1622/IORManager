@@ -26,6 +26,10 @@ public class PurchaseOrder : FinancialDocument
     [MaxLength(4000)]
     public string? InvestmentNotes { get; set; }
 
+    /// <summary>Internal-order workflow status: Pendiente | EnProceso | Completada.</summary>
+    [MaxLength(20)]
+    public string Status { get; set; } = "Pendiente";
+
     public List<DocumentLine> Lines { get; set; }
 
     public List<PurchaseOrderAttachment> Attachments { get; set; }
