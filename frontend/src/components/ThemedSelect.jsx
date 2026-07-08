@@ -68,7 +68,16 @@ const ThemedSelect = ({ value, options, onChange, ariaLabel, disabled = false, i
       }
     }
 
-    const handleScrollOrResize = () => closeMenu()
+    const handleScrollOrResize = (event) => {
+      const target = event.target
+      // Scrolling inside the menu's own listbox (e.g. to reach options below
+      // the max-height cutoff) shouldn't close it — only scrolling elsewhere
+      // on the page should.
+      if (target instanceof Element && target.closest('.themed-select__menu')) {
+        return
+      }
+      closeMenu()
+    }
 
     window.document.addEventListener('mousedown', handleMouseDown)
     window.document.addEventListener('keydown', handleKeyDown)
