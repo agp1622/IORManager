@@ -17,20 +17,17 @@ public class QuotesController : ControllerBase
     private readonly IFinancialDocumentRepository<Quote> _repository;
     private readonly IFinancialDocumentPdfService _pdfService;
     private readonly IInvoiceNumberGenerator _numberGenerator;
-    private readonly INcfNumberGenerator _ncfNumberGenerator;
     private readonly IORManagerContext _context;
 
     public QuotesController(
         IFinancialDocumentRepository<Quote> repository,
         IFinancialDocumentPdfService pdfService,
         IInvoiceNumberGenerator numberGenerator,
-        INcfNumberGenerator ncfNumberGenerator,
         IORManagerContext context)
     {
         _repository = repository;
         _pdfService = pdfService;
         _numberGenerator = numberGenerator;
-        _ncfNumberGenerator = ncfNumberGenerator;
         _context = context;
     }
 
@@ -43,18 +40,49 @@ public class QuotesController : ControllerBase
         {
             var quoteIds = quotes.Select(q => q.Id).ToList();
 
-            var expensesByQuote = _context.PurchaseOrders
-                .Where(po => po.QuoteId.HasValue && quoteIds.Contains(po.QuoteId.Value))
-                .GroupBy(po => po.QuoteId!.Value)
-                .Select(g => new { QuoteId = g.Key, Total = g.Sum(po => po.TotalAmount), Count = g.Count() })
-                .ToDictionary(x => x.QuoteId, x => x);
+            var quoteIdsWithOrders = _context.PurchaseOrders
+                .Where(order => order.QuoteId.HasValue && quoteIds.Contains(order.QuoteId.Value))
+                .Select(order => order.QuoteId!.Value)
+                .Distinct()
+                .ToHashSet();
 
             foreach (var quote in quotes)
             {
-                if (expensesByQuote.TryGetValue(quote.Id, out var exp))
+                quote.HasOrder = quoteIdsWithOrders.Contains(quote.Id);
+            }
+
+            var expenseRows = _context.OrderExpenses
+                .Join(
+                    _context.PurchaseOrders,
+                    expense => expense.OrderId,
+                    order => order.Id,
+                    (expense, order) => new { order.QuoteId, expense.Amount, expense.CurrencyCode })
+                .Where(row => row.QuoteId.HasValue && quoteIds.Contains(row.QuoteId.Value))
+                .ToList();
+
+            var expensesByQuote = expenseRows
+                .GroupBy(row => row.QuoteId!.Value)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            foreach (var quote in quotes)
+            {
+                if (!expensesByQuote.TryGetValue(quote.Id, out var rows))
                 {
-                    quote.TotalExpenses = exp.Total;
-                    quote.ExpenseCount = exp.Count;
+                    continue;
+                }
+
+                quote.ExpenseCount = rows.Count;
+                quote.TotalExpenses = rows
+                    .Where(row => string.Equals(row.CurrencyCode, quote.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                    .Sum(row => row.Amount);
+
+                var otherRows = rows
+                    .Where(row => !string.Equals(row.CurrencyCode, quote.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (otherRows.Count > 0)
+                {
+                    quote.OtherCurrencyExpenses = otherRows.Sum(row => row.Amount);
+                    quote.OtherCurrencyCode = otherRows[0].CurrencyCode;
                 }
             }
         }
@@ -283,105 +311,8 @@ public class QuotesController : ControllerBase
         return File(pdfBytes, "application/pdf", $"Quote-{quote.Number}.pdf");
     }
 
-    [HttpPost("{id:guid}/convert")]
-    public ActionResult<QuoteConversionResponse> ConvertQuoteToInvoice(Guid id, [FromBody] NcfAssignmentRequest? request)
-    {
-        var quote = GetQuoteWithLines(id);
-        if (quote is null)
-        {
-            return NotFound();
-        }
-
-        if (quote.ConvertedInvoiceId.HasValue)
-        {
-            var existingInvoice = _context.Invoices
-                .AsNoTracking()
-                .FirstOrDefault(invoice => invoice.Id == quote.ConvertedInvoiceId.Value);
-            if (existingInvoice is not null)
-            {
-                return Ok(new QuoteConversionResponse(
-                    existingInvoice.Id,
-                    existingInvoice.Number,
-                    existingInvoice.NcfNumber ?? string.Empty,
-                    existingInvoice.NcfCategory ?? NcfCategoryCatalog.DefaultCategoryCode));
-            }
-        }
-
-        if (!TryResolveNcfData(
-                request?.NcfNumber,
-                request?.NcfCategory,
-                out var normalizedNcf,
-                out var normalizedCategory,
-                out var ncfError))
-        {
-            return ncfError!;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedNcf) && IsDuplicateNcf(normalizedNcf))
-        {
-            return DuplicateNcfConflict(normalizedNcf);
-        }
-
-        string? categoryForGeneration = null;
-        if (request?.SkipNcf != true)
-        {
-            categoryForGeneration = normalizedCategory ?? NcfCategoryCatalog.DefaultCategoryCode;
-            if (string.IsNullOrWhiteSpace(normalizedNcf))
-            {
-                normalizedNcf = _ncfNumberGenerator.GenerateNextNumber(categoryForGeneration);
-            }
-
-            if (IsDuplicateNcf(normalizedNcf))
-            {
-                return DuplicateNcfConflict(normalizedNcf);
-            }
-        }
-
-        var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(_numberGenerator.GenerateNextNumber());
-        while (_context.Invoices.Any(invoice => invoice.Number == invoiceNumber))
-        {
-            invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(_numberGenerator.GenerateNextNumber());
-        }
-
-        var generatedAt = DateTime.UtcNow;
-        var invoice = new Invoice
-        {
-            Id = Guid.NewGuid(),
-            Number = invoiceNumber,
-            Date = DateOnly.FromDateTime(generatedAt),
-            CurrencyCode = quote.CurrencyCode,
-            CultureName = quote.CultureName,
-            CustomerId = quote.CustomerId,
-            CustomerName = quote.CustomerName,
-            CustomerAddress = quote.CustomerAddress,
-            CustomerContact = quote.CustomerContact,
-            QuoteId = quote.Id,
-            ItbisRate = quote.ItbisRate,
-            NcfNumber = normalizedNcf,
-            NcfCategory = normalizedCategory ?? categoryForGeneration ?? null,
-            InvoiceGeneratedAt = generatedAt,
-            Lines = quote.Lines.Select(line => new DocumentLine
-            {
-                Description = line.Description,
-                Quantity = line.Quantity,
-                UnitPrice = line.UnitPrice,
-                UnitOfMeasure = line.UnitOfMeasure
-            }).ToList()
-        };
-        invoice.RecalculateTotal();
-
-        quote.ConvertedInvoiceId = invoice.Id;
-        quote.ConvertedAt = generatedAt;
-
-        _context.Invoices.Add(invoice);
-        _context.SaveChanges();
-
-        return Ok(new QuoteConversionResponse(
-            invoice.Id,
-            invoice.Number,
-            invoice.NcfNumber ?? string.Empty,
-            invoice.NcfCategory ?? NcfCategoryCatalog.DefaultCategoryCode));
-    }
+    // Direct Quote → Invoice conversion has been removed: invoices are now only generated
+    // from a completed Order (see PurchaseOrdersController.ConvertPurchaseOrderToInvoice).
 
     [HttpPost("{id:guid}/undo-conversion")]
     public ActionResult<Quote> UndoQuoteConversion(Guid id)
@@ -403,6 +334,16 @@ public class QuotesController : ControllerBase
 
         if (invoice is not null)
         {
+            if (invoice.OrderId.HasValue)
+            {
+                var order = _context.PurchaseOrders.FirstOrDefault(po => po.Id == invoice.OrderId.Value);
+                if (order is not null)
+                {
+                    order.ConvertedInvoiceId = null;
+                    order.ConvertedAt = null;
+                }
+            }
+
             var invoiceLines = invoice.Lines.ToList();
             if (invoiceLines.Count > 0)
             {
@@ -535,111 +476,6 @@ public class QuotesController : ControllerBase
         _context.Quotes
             .Include(existing => existing.Lines)
             .FirstOrDefault(existing => existing.Id == id);
-
-    private bool IsDuplicateNcf(string normalizedNcf) =>
-        _context.Invoices.Any(invoice => invoice.NcfNumber == normalizedNcf);
-
-    private ActionResult DuplicateNcfConflict(string normalizedNcf) =>
-        Conflict(new ProblemDetails
-        {
-            Title = "Duplicate NCF",
-            Detail = $"The NCF \"{normalizedNcf}\" is already assigned to another invoice.",
-        });
-
-    private bool TryResolveNcfData(
-        string? ncfNumber,
-        string? categoryCode,
-        out string? normalizedNcf,
-        out string? normalizedCategory,
-        out ActionResult? errorResult)
-    {
-        normalizedNcf = NormalizeNcfNumber(ncfNumber);
-        if (!TryNormalizeCategoryCode(categoryCode, out normalizedCategory, out errorResult))
-        {
-            return false;
-        }
-
-        if (NcfCategoryCatalog.TryInferCategoryFromNcf(normalizedNcf, out var inferredDefinition))
-        {
-            if (!string.IsNullOrWhiteSpace(normalizedCategory) &&
-                !string.Equals(normalizedCategory, inferredDefinition.Code, StringComparison.OrdinalIgnoreCase))
-            {
-                errorResult = NcfCategoryMismatchBadRequest(inferredDefinition.Code, normalizedCategory);
-                return false;
-            }
-
-            normalizedCategory = inferredDefinition.Code;
-        }
-
-        errorResult = null;
-        return true;
-    }
-
-    private bool TryNormalizeCategoryCode(
-        string? categoryCode,
-        out string? normalizedCategory,
-        out ActionResult? errorResult)
-    {
-        normalizedCategory = null;
-        if (string.IsNullOrWhiteSpace(categoryCode))
-        {
-            errorResult = null;
-            return true;
-        }
-
-        if (!NcfCategoryCatalog.TryGetByCode(categoryCode, out var definition))
-        {
-            errorResult = BadRequest(new ProblemDetails
-            {
-                Title = "Invalid NCF category",
-                Detail = $"The NCF category \"{categoryCode.Trim()}\" is not supported.",
-            });
-            return false;
-        }
-
-        normalizedCategory = definition.Code;
-        errorResult = null;
-        return true;
-    }
-
-    private ActionResult NcfCategoryMismatchBadRequest(string inferredCategory, string providedCategory) =>
-        BadRequest(new ProblemDetails
-        {
-            Title = "NCF category mismatch",
-            Detail = $"The NCF value belongs to category \"{inferredCategory}\" but \"{providedCategory}\" was requested.",
-        });
-
-    private static string? NormalizeNcfNumber(string? ncfNumber)
-    {
-        if (string.IsNullOrWhiteSpace(ncfNumber))
-        {
-            return null;
-        }
-
-        var trimmed = ncfNumber.Trim().ToUpperInvariant();
-        var compact = new string(trimmed.Where(ch => ch != '-' && !char.IsWhiteSpace(ch)).ToArray());
-        const string ncfPrefix = "NCF";
-
-        if (compact.Length >= ncfPrefix.Length &&
-            compact.StartsWith(ncfPrefix, StringComparison.Ordinal))
-        {
-            var suffix = compact[ncfPrefix.Length..];
-            if (string.IsNullOrWhiteSpace(suffix))
-            {
-                return null;
-            }
-
-            return $"{ncfPrefix}-{suffix}";
-        }
-
-        var normalizedKnown = NcfCategoryCatalog.TryNormalizeKnownNcfNumber(compact);
-        if (!string.IsNullOrWhiteSpace(normalizedKnown))
-        {
-            return normalizedKnown;
-        }
-
-        return trimmed;
-    }
 
     private bool TryResolveCustomerRecord(
         string? customerName,

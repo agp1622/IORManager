@@ -82,6 +82,7 @@ public class Program
         builder.Services.AddSingleton<IFinancialDocumentPdfService, QuestPdfFinancialDocumentPdfService>();
         builder.Services.AddScoped<IInvoiceNumberGenerator, InvoiceNumberGenerator>();
         builder.Services.AddScoped<INcfNumberGenerator, NcfNumberGenerator>();
+        builder.Services.AddScoped<NcfAssignmentService>();
 
         builder.Services.AddDbContext<IORManagerContext>(options =>
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -140,7 +141,9 @@ public class Program
             var context = provider.GetRequiredService<IORManagerContext>();
             return new EfFinancialDocumentRepository<PurchaseOrder>(
                 context,
-                query => query.Include(purchaseOrder => purchaseOrder.Lines));
+                query => query
+                    .Include(purchaseOrder => purchaseOrder.Lines)
+                    .Include(purchaseOrder => purchaseOrder.Expenses));
         });
 
         services.AddScoped<IFinancialDocumentRepository<AccountPayable>>(provider =>

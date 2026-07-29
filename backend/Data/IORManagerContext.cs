@@ -24,6 +24,7 @@ public class IORManagerContext : DbContext
     public DbSet<NcfSequence> NcfSequences => Set<NcfSequence>();
     public DbSet<FiscalRegime> FiscalRegimes => Set<FiscalRegime>();
     public DbSet<PurchaseOrderAttachment> PurchaseOrderAttachments => Set<PurchaseOrderAttachment>();
+    public DbSet<OrderExpense> OrderExpenses => Set<OrderExpense>();
     public DbSet<QuoteAttachment> QuoteAttachments => Set<QuoteAttachment>();
     public DbSet<AccountPayable> AccountsPayable => Set<AccountPayable>();
     public DbSet<User> Users => Set<User>();
@@ -42,6 +43,7 @@ public class IORManagerContext : DbContext
         ConfigureNcfSequence(modelBuilder);
         ConfigureFiscalRegime(modelBuilder);
         ConfigurePurchaseOrderAttachment(modelBuilder);
+        ConfigureOrderExpense(modelBuilder);
         ConfigureQuoteAttachment(modelBuilder);
         ConfigurePurchaseOrderQuoteLink(modelBuilder);
         ConfigureAccountPayable(modelBuilder);
@@ -144,6 +146,10 @@ public class IORManagerContext : DbContext
                 .IsUnique()
                 .HasFilter("[QuoteId] IS NOT NULL");
 
+            builder.HasIndex(invoice => invoice.OrderId)
+                .IsUnique()
+                .HasFilter("[OrderId] IS NOT NULL");
+
             var expirationConverter = new ValueConverter<DateOnly?, DateTime?>(
                 dateOnly => dateOnly.HasValue ? dateOnly.Value.ToDateTime(TimeOnly.MinValue) : null,
                 dateTime => dateTime.HasValue
@@ -169,6 +175,12 @@ public class IORManagerContext : DbContext
                 .WithMany()
                 .HasForeignKey(quote => quote.CustomerId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Pinned to their existing (unprefixed) column names so adding same-named
+            // ConvertedInvoiceId/ConvertedAt properties on PurchaseOrder doesn't make EF
+            // rename these columns out from under existing data.
+            builder.Property(quote => quote.ConvertedInvoiceId).HasColumnName("ConvertedInvoiceId");
+            builder.Property(quote => quote.ConvertedAt).HasColumnName("ConvertedAt");
 
             builder.HasIndex(quote => quote.ConvertedInvoiceId)
                 .IsUnique()
@@ -233,6 +245,25 @@ public class IORManagerContext : DbContext
         });
     }
 
+    private static void ConfigureOrderExpense(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<OrderExpense>(builder =>
+        {
+            builder.HasKey(e => e.Id);
+            builder.Property(e => e.Description).HasMaxLength(300).IsRequired();
+            builder.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
+            builder.Property(e => e.Rnc).HasMaxLength(20);
+            builder.Property(e => e.ReceiptFileName).HasMaxLength(255);
+            builder.Property(e => e.ReceiptContentType).HasMaxLength(100);
+            builder.Property(e => e.ReceiptFileData).HasColumnType("varbinary(max)");
+
+            builder.HasOne(e => e.Order)
+                .WithMany(po => po.Expenses)
+                .HasForeignKey(e => e.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
     private static void ConfigureQuoteAttachment(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<QuoteAttachment>(builder =>
@@ -260,6 +291,15 @@ public class IORManagerContext : DbContext
                 .WithMany()
                 .HasForeignKey(po => po.QuoteId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Distinct column names so these don't collide with Quote's own
+            // (also named) ConvertedInvoiceId/ConvertedAt columns in the shared TPH table.
+            builder.Property(po => po.ConvertedInvoiceId).HasColumnName("Order_ConvertedInvoiceId");
+            builder.Property(po => po.ConvertedAt).HasColumnName("Order_ConvertedAt");
+
+            builder.HasIndex(po => po.ConvertedInvoiceId)
+                .IsUnique()
+                .HasFilter("[Order_ConvertedInvoiceId] IS NOT NULL");
         });
     }
 

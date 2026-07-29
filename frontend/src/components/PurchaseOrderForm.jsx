@@ -1,34 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import ThemedSelect from './ThemedSelect'
 
-const createEmptyLine = (unitOfMeasure = 'unit') => ({
-  description: '',
-  quantity: '1',
-  unitPrice: '0',
-  unitOfMeasure,
-})
-
-const unitOptions = [
-  'unit',
-  'kg',
-  'g',
-  't',
-  'm',
-  'cm',
-  'mm',
-  'km',
-  'm2',
-  'm3',
-  'l',
-  'ml',
-  'lb',
-  'oz',
-  'ft',
-  'in',
-  'yd',
-  'gal',
-]
-
 const CURRENCY_CODES = ['USD', 'DOP']
 
 const PurchaseOrderForm = ({
@@ -52,7 +24,6 @@ const PurchaseOrderForm = ({
   const [quoteId, setQuoteId] = useState('')
   const [quoteSearch, setQuoteSearch] = useState('')
   const [investmentNotes, setInvestmentNotes] = useState('')
-  const [lines, setLines] = useState([createEmptyLine()])
 
   // Build a lookup: display label → id
   const quoteOptions = useMemo(
@@ -80,20 +51,10 @@ const PurchaseOrderForm = ({
       const matchedOption = quoteOptions.find((opt) => opt.id === initialPO.quoteId)
       setQuoteId(initialPO.quoteId || '')
       setQuoteSearch(matchedOption?.label ?? '')
-      setLines(
-        Array.isArray(initialPO.lines) && initialPO.lines.length > 0
-          ? initialPO.lines.map((l) => ({
-              description: l.description ?? '',
-              quantity: String(l.quantity ?? 1),
-              unitPrice: String(l.unitPrice ?? 0),
-              unitOfMeasure: l.unitOfMeasure || 'unit',
-            }))
-          : [createEmptyLine()],
-      )
       return
     }
 
-    // Pre-fill linked quote (from "Log expense" action on a quote card)
+    // Pre-fill linked quote (from "Create order" action on a quote card)
     if (prefillQuoteId) {
       const match = quoteOptions.find((opt) => opt.id === prefillQuoteId)
       if (match) {
@@ -112,29 +73,6 @@ const PurchaseOrderForm = ({
     setQuoteId(match ? match.id : '')
   }
 
-  const updateLine = (index, field, value) => {
-    setLines((current) =>
-      current.map((line, lineIndex) =>
-        lineIndex === index ? { ...line, [field]: value } : line,
-      ),
-    )
-  }
-
-  const addLine = () => {
-    setLines((current) => {
-      const lastUnit = current[current.length - 1]?.unitOfMeasure ?? 'unit'
-      return [...current, createEmptyLine(lastUnit)]
-    })
-  }
-
-  const removeLine = (index) => {
-    setLines((current) =>
-      current.length > 1
-        ? current.filter((_, lineIndex) => lineIndex !== index)
-        : current,
-    )
-  }
-
   const handleSubmit = async (event) => {
     event.preventDefault()
 
@@ -145,12 +83,7 @@ const PurchaseOrderForm = ({
           currencyCode,
           quoteId: quoteId || null,
           investmentNotes: investmentNotes.trim() || null,
-          lines: lines.map((line) => ({
-            description: line.description,
-            quantity: Number(line.quantity) || 0,
-            unitPrice: Number(line.unitPrice) || 0,
-            unitOfMeasure: line.unitOfMeasure,
-          })),
+          lines: [],
         }
       : {
           purchaseOrderNumber: orderNumber,
@@ -159,12 +92,7 @@ const PurchaseOrderForm = ({
           currencyCode,
           quoteId: quoteId || null,
           investmentNotes: investmentNotes.trim() || null,
-          lines: lines.map((line) => ({
-            description: line.description,
-            quantity: Number(line.quantity) || 0,
-            unitPrice: Number(line.unitPrice) || 0,
-            unitOfMeasure: line.unitOfMeasure,
-          })),
+          lines: [],
         }
 
     const wasSuccessful = await onSubmit(payload)
@@ -177,7 +105,6 @@ const PurchaseOrderForm = ({
       setQuoteId('')
       setQuoteSearch('')
       setInvestmentNotes('')
-      setLines([createEmptyLine()])
     }
   }
 
@@ -266,73 +193,9 @@ const PurchaseOrderForm = ({
         </label>
       </div>
 
-      <div className="form-section">
-        <div className="form-section__header">
-          <h4>{t('purchaseOrderForm.lineItemsHeading')}</h4>
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={addLine}
-          >
-            {t('purchaseOrderForm.addLine')}
-          </button>
-        </div>
-        {lines.map((line, index) => (
-          <div key={index} className="line-row">
-            <label className="line-row__description">
-              {t('purchaseOrderForm.descriptionLabel')}
-              <textarea
-                rows="3"
-                value={line.description}
-                onChange={(event) =>
-                  updateLine(index, 'description', event.target.value)
-                }
-                required
-                placeholder={t('purchaseOrderForm.descriptionPlaceholder')}
-              />
-            </label>
-            <label>
-              {t('purchaseOrderForm.quantityLabel')}
-              <input
-                type="number"
-                min="1"
-                value={line.quantity}
-                onChange={(event) => updateLine(index, 'quantity', event.target.value)}
-                required
-              />
-            </label>
-            <label>
-              {t('purchaseOrderForm.unitOfMeasureLabel')}
-              <ThemedSelect
-                value={line.unitOfMeasure}
-                onChange={(nextValue) => updateLine(index, 'unitOfMeasure', nextValue)}
-                ariaLabel={t('purchaseOrderForm.unitOfMeasureLabel')}
-                options={unitOptions.map((code) => ({ value: code, label: t(`units.${code}`) }))}
-              />
-            </label>
-            <label>
-              {t('purchaseOrderForm.unitPriceLabel')}
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={line.unitPrice}
-                onChange={(event) => updateLine(index, 'unitPrice', event.target.value)}
-                required
-              />
-            </label>
-            <button
-              type="button"
-              className="button button--icon"
-              onClick={() => removeLine(index)}
-              aria-label={t('purchaseOrderForm.removeLine')}
-              disabled={lines.length === 1}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
+      {!isEditMode ? (
+        <p className="form-hint">{t('purchaseOrderForm.expensesAfterCreateHint')}</p>
+      ) : null}
 
       <div className="form-actions">
         {isEditMode && onCancelEdit ? (

@@ -1494,6 +1494,44 @@ textarea:focus {
   line-height: 1;
 }
 
+.modal--wide {
+  width: min(1200px, 100%);
+}
+
+.modal--wide .line-table th,
+.modal--wide .line-table td {
+  padding: 0.85rem 0.9rem;
+}
+
+.modal--wide .line-table thead th {
+  font-size: 0.85rem;
+}
+
+.modal--wide .line-table__textarea {
+  min-height: 3.4rem;
+  font-size: 1rem;
+}
+
+.modal--wide .line-table__input,
+.modal--wide input[type='text'],
+.modal--wide input[type='number'] {
+  min-height: 3rem;
+  font-size: 1rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.modal--wide .themed-select__trigger {
+  min-height: 3rem;
+  min-width: 6rem;
+  font-size: 1rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.modal--wide .line-table th:first-child,
+.modal--wide .line-table td:first-child {
+  min-width: 16rem;
+}
+
 @media (max-width: 480px) {
   .modal-overlay {
     padding: 0;

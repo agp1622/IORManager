@@ -49,15 +49,27 @@ public class Quote : FinancialDocument
     [NotMapped]
     public DateOnly ExpirationDate => Date.AddMonths(1);
 
-    /// <summary>Sum of TotalAmount for all PurchaseOrders linked to this quote. Populated by the controller, not persisted.</summary>
+    /// <summary>Whether at least one Order has been created for this quote. Populated by the controller, not persisted.</summary>
+    [NotMapped]
+    public bool HasOrder { get; set; }
+
+    /// <summary>Sum of expense amounts (same currency as this quote) across all linked Orders. Populated by the controller, not persisted.</summary>
     [NotMapped]
     public decimal TotalExpenses { get; set; }
 
-    /// <summary>Number of PurchaseOrders linked to this quote. Populated by the controller, not persisted.</summary>
+    /// <summary>Number of expenses across all Orders linked to this quote. Populated by the controller, not persisted.</summary>
     [NotMapped]
     public int ExpenseCount { get; set; }
 
-    /// <summary>Revenue (TotalAmount) minus linked expenses. Meaningful only when TotalExpenses has been populated.</summary>
+    /// <summary>Sum of expense amounts logged in a currency other than this quote's. Populated by the controller, not persisted.</summary>
+    [NotMapped]
+    public decimal OtherCurrencyExpenses { get; set; }
+
+    /// <summary>The currency code of <see cref="OtherCurrencyExpenses"/>, when it is non-zero. Populated by the controller, not persisted.</summary>
+    [NotMapped]
+    public string? OtherCurrencyCode { get; set; }
+
+    /// <summary>Revenue (TotalAmount) minus same-currency linked expenses. Meaningful only when TotalExpenses has been populated.</summary>
     [NotMapped]
     public decimal Profit => TotalAmount - TotalExpenses;
 

@@ -4,6 +4,7 @@ using IORManager.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace IORManager.Migrations
 {
     [DbContext(typeof(IORManagerContext))]
-    partial class IORManagerContextModelSnapshot : ModelSnapshot
+    [Migration("20260729052557_AddOrderInvoiceLink")]
+    partial class AddOrderInvoiceLink
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -377,64 +380,6 @@ namespace IORManager.Migrations
                             CategoryCode = "B02",
                             NextNumber = 1L
                         });
-                });
-
-            modelBuilder.Entity("IORManager.Models.OrderExpense", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("nvarchar(3)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<bool>("HasInvoice")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ReceiptContentType")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<byte[]>("ReceiptFileData")
-                        .HasColumnType("varbinary(max)");
-
-                    b.Property<string>("ReceiptFileName")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
-
-                    b.Property<long?>("ReceiptFileSize")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime?>("ReceiptUploadedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Rnc")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrderId");
-
-                    b.ToTable("OrderExpenses");
                 });
 
             modelBuilder.Entity("IORManager.Models.PurchaseOrderAttachment", b =>
@@ -809,17 +754,6 @@ namespace IORManager.Migrations
                     b.Navigation("Quote");
                 });
 
-            modelBuilder.Entity("IORManager.Models.OrderExpense", b =>
-                {
-                    b.HasOne("IORManager.Models.PurchaseOrder", "Order")
-                        .WithMany("Expenses")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Order");
-                });
-
             modelBuilder.Entity("IORManager.Models.PurchaseOrderAttachment", b =>
                 {
                     b.HasOne("IORManager.Models.PurchaseOrder", "PurchaseOrder")
@@ -918,8 +852,6 @@ namespace IORManager.Migrations
             modelBuilder.Entity("IORManager.Models.PurchaseOrder", b =>
                 {
                     b.Navigation("Attachments");
-
-                    b.Navigation("Expenses");
 
                     b.Navigation("Lines");
                 });

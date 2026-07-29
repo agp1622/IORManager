@@ -24,7 +24,6 @@ public record PurchaseOrderCreateRequest
     [MaxLength(3)]
     public string CurrencyCode { get; init; } = "USD";
 
-    [MinLength(1)]
     public IReadOnlyList<PurchaseOrderLineRequest> Lines { get; init; } = Array.Empty<PurchaseOrderLineRequest>();
 
     public PurchaseOrder ToPurchaseOrder()
@@ -63,8 +62,43 @@ public record PurchaseOrderUpdateRequest
     [MaxLength(3)]
     public string CurrencyCode { get; init; } = "USD";
 
-    [MinLength(1)]
     public IReadOnlyList<PurchaseOrderLineRequest> Lines { get; init; } = Array.Empty<PurchaseOrderLineRequest>();
+}
+
+public record OrderExpenseCreateRequest
+{
+    [Required(AllowEmptyStrings = true)]
+    public string Description { get; init; } = string.Empty;
+
+    [Range(typeof(decimal), "0.0", "79228162514264337593543950335")]
+    public decimal Amount { get; init; } = 0m;
+
+    [Required]
+    [MaxLength(3)]
+    public string CurrencyCode { get; init; } = "USD";
+
+    public bool HasInvoice { get; init; }
+
+    [MaxLength(20)]
+    public string? Rnc { get; init; }
+}
+
+public record OrderExpenseUpdateRequest
+{
+    [Required(AllowEmptyStrings = true)]
+    public string Description { get; init; } = string.Empty;
+
+    [Range(typeof(decimal), "0.0", "79228162514264337593543950335")]
+    public decimal Amount { get; init; } = 0m;
+
+    [Required]
+    [MaxLength(3)]
+    public string CurrencyCode { get; init; } = "USD";
+
+    public bool HasInvoice { get; init; }
+
+    [MaxLength(20)]
+    public string? Rnc { get; init; }
 }
 
 public record PurchaseOrderLineRequest

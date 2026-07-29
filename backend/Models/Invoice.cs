@@ -36,6 +36,9 @@ public class Invoice : FinancialDocument
     [NotMapped]
     public string? QuoteNumber { get; set; }
 
+    /// <summary>The Order this invoice was generated from.</summary>
+    public Guid? OrderId { get; set; }
+
     /// <summary>FK to the fiscal regime (B01, B02) used when the NCF was assigned.</summary>
     public int? FiscalRegimeId { get; set; }
     public FiscalRegime? FiscalRegime { get; set; }

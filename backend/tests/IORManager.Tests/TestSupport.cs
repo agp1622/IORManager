@@ -93,7 +93,21 @@ internal static class TestSupport
             repository,
             new StubFinancialDocumentPdfService(),
             new StubInvoiceNumberGenerator(),
+            context);
+    }
+
+    public static PurchaseOrdersController CreatePurchaseOrdersController(IORManagerContext context)
+    {
+        var repository = new EfFinancialDocumentRepository<PurchaseOrder>(
+            context,
+            query => query.Include(po => po.Lines));
+
+        return new PurchaseOrdersController(
+            repository,
+            new StubFinancialDocumentPdfService(),
+            new StubInvoiceNumberGenerator(),
             new NcfNumberGenerator(context),
+            new NcfAssignmentService(context),
             context);
     }
 

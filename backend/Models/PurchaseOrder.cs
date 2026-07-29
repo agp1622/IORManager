@@ -9,6 +9,7 @@ public class PurchaseOrder : FinancialDocument
     {
         Lines = new List<DocumentLine>();
         Attachments = new List<PurchaseOrderAttachment>();
+        Expenses = new List<OrderExpense>();
     }
 
     [NotMapped]
@@ -30,9 +31,16 @@ public class PurchaseOrder : FinancialDocument
     [MaxLength(20)]
     public string Status { get; set; } = "Pendiente";
 
+    /// <summary>Set once this order has been converted into an Invoice.</summary>
+    public Guid? ConvertedInvoiceId { get; set; }
+    public DateTime? ConvertedAt { get; set; }
+
     public List<DocumentLine> Lines { get; set; }
 
     public List<PurchaseOrderAttachment> Attachments { get; set; }
 
-    public void RecalculateTotal() => TotalAmount = Lines.Sum(line => line.LineTotal);
+    public List<OrderExpense> Expenses { get; set; }
+
+    public void RecalculateTotal() =>
+        TotalAmount = Lines.Sum(line => line.LineTotal) + Expenses.Sum(expense => expense.Amount);
 }

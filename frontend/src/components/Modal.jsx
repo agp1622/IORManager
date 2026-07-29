@@ -1,6 +1,6 @@
 import { useEffect, useId } from 'react'
 
-const Modal = ({ isOpen, onClose, title, description, eyebrow, children }) => {
+const Modal = ({ isOpen, onClose, title, description, eyebrow, children, className = '' }) => {
   const titleId = useId()
 
   useEffect(() => {
@@ -38,7 +38,7 @@ const Modal = ({ isOpen, onClose, title, description, eyebrow, children }) => {
   return (
     <div className="modal-overlay" onMouseDown={handleOverlayClick}>
       <div
-        className="modal"
+        className={`modal ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby={`modal-title-${titleId}`}

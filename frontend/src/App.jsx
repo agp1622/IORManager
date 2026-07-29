@@ -21,13 +21,14 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5031/api'
 const CURRENCY_CODES = ['USD', 'DOP']
-const ROWS_PER_PAGE = 10
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 
 const BRAND_NOTES = {
   quotes: 'Cotizaciones impactantes listas para convertirse en facturas.',
   invoices: 'Facturas fiscales listas para control, descarga y seguimiento.',
   receipts: 'Recibos elegantes que transmiten confianza y precisión.',
-  purchaseOrders: 'Órdenes de compra con trazabilidad y documentación completa.',
+  purchaseOrders: 'Órdenes con trazabilidad de gastos y documentación completa.',
   accountsPayable: 'Control de facturas a proveedores pendientes de pago.',
   default: 'Documentos oficiales con el sello PAPAVELAG.',
 }
@@ -96,6 +97,20 @@ const createSectionConfig = (t) => ({
     createSuccess: t('sections.quotes.createSuccess'),
     createError: t('sections.quotes.createError'),
   },
+  purchaseOrders: {
+    title: t('sections.purchaseOrders.title'),
+    description: t('sections.purchaseOrders.description'),
+    endpoint: 'PurchaseOrders',
+    singular: t('sections.purchaseOrders.singular'),
+    partyLabel: t('sections.purchaseOrders.partyLabel'),
+    loading: t('sections.purchaseOrders.loading'),
+    empty: t('sections.purchaseOrders.empty'),
+    loadError: t('sections.purchaseOrders.loadError'),
+    createHeading: t('sections.purchaseOrders.createHeading'),
+    createDescription: t('sections.purchaseOrders.createDescription'),
+    createSuccess: t('sections.purchaseOrders.createSuccess'),
+    createError: t('sections.purchaseOrders.createError'),
+  },
   invoices: {
     title: t('sections.invoices.title'),
     description: t('sections.invoices.description'),
@@ -123,20 +138,6 @@ const createSectionConfig = (t) => ({
     createDescription: t('sections.receipts.createDescription'),
     createSuccess: t('sections.receipts.createSuccess'),
     createError: t('sections.receipts.createError'),
-  },
-  purchaseOrders: {
-    title: t('sections.purchaseOrders.title'),
-    description: t('sections.purchaseOrders.description'),
-    endpoint: 'PurchaseOrders',
-    singular: t('sections.purchaseOrders.singular'),
-    partyLabel: t('sections.purchaseOrders.partyLabel'),
-    loading: t('sections.purchaseOrders.loading'),
-    empty: t('sections.purchaseOrders.empty'),
-    loadError: t('sections.purchaseOrders.loadError'),
-    createHeading: t('sections.purchaseOrders.createHeading'),
-    createDescription: t('sections.purchaseOrders.createDescription'),
-    createSuccess: t('sections.purchaseOrders.createSuccess'),
-    createError: t('sections.purchaseOrders.createError'),
   },
   accountsPayable: {
     title: t('sections.accountsPayable.title'),
@@ -184,6 +185,7 @@ const DocumentList = ({
   selectedIds = null,
   onToggleSelect,
   onToggleSelectAll,
+  onOpenExpenses,
 }) => {
   const isQuoteList = config?.endpoint === 'Quotes'
   const isInvoiceList = config?.endpoint === 'Invoices'
@@ -387,6 +389,9 @@ const DocumentList = ({
                 {renderSortButton(t('documentList.status'), 'status')}
               </th>
             ) : null}
+            {isPurchaseOrderList ? (
+              <th scope="col">{t('expensesDialog.action')}</th>
+            ) : null}
             <th scope="col">{t('documentList.actions')}</th>
           </tr>
         </thead>
@@ -449,6 +454,9 @@ const DocumentList = ({
                     {isQuoteList && invoiceGenerated ? (
                       <span className="pill pill--success">{t('documentList.invoiceReady')}</span>
                     ) : null}
+                    {isQuoteList && !invoiceGenerated && document.hasOrder ? (
+                      <span className="pill pill--info">{t('documentList.orderCreated')}</span>
+                    ) : null}
                     {isQuoteList && ncfNumber ? (
                       <span className="pill pill--muted">
                         {ncfNumber}
@@ -480,7 +488,10 @@ const DocumentList = ({
                   {formatCurrency(document.totalAmount, currencyCode, cultureName)}
                 </td>
                 {isQuoteList ? (() => {
-                  const hasExpenses = Number(document.totalExpenses) > 0
+                  const sameCurrencyExpenses = Number(document.totalExpenses) || 0
+                  const otherCurrencyExpenses = Number(document.otherCurrencyExpenses) || 0
+                  const otherCurrencyCode = document.otherCurrencyCode
+                  const hasExpenses = sameCurrencyExpenses > 0 || otherCurrencyExpenses > 0
                   if (!hasExpenses) {
                     return (
                       <td data-heading={t('documentList.profitLabel')} className="profit-cell profit-cell--none">
@@ -488,7 +499,7 @@ const DocumentList = ({
                       </td>
                     )
                   }
-                  const profit = Number(document.totalAmount) - Number(document.totalExpenses)
+                  const profit = Number(document.totalAmount) - sameCurrencyExpenses
                   const isPositive = profit >= 0
                   return (
                     <td data-heading={t('documentList.profitLabel')} className={`profit-cell ${isPositive ? 'profit-cell--positive' : 'profit-cell--negative'}`}>
@@ -496,8 +507,13 @@ const DocumentList = ({
                         {formatCurrency(profit, currencyCode, cultureName)}
                       </span>
                       <span className="profit-cell__expenses">
-                        {t('documentList.expensesLabel')}: {formatCurrency(document.totalExpenses, currencyCode, cultureName)}
+                        {t('documentList.expensesLabel')}: {formatCurrency(sameCurrencyExpenses, currencyCode, cultureName)}
                       </span>
+                      {otherCurrencyExpenses > 0 && otherCurrencyCode ? (
+                        <span className="profit-cell__expenses">
+                          {t('documentList.otherCurrencyExpensesLabel')}: {formatCurrency(otherCurrencyExpenses, otherCurrencyCode, cultureName)}
+                        </span>
+                      ) : null}
                     </td>
                   )
                 })() : null}
@@ -526,6 +542,21 @@ const DocumentList = ({
                     }`}>
                       {document.status || '—'}
                     </span>
+                  </td>
+                ) : null}
+                {isPurchaseOrderList ? (
+                  <td data-heading={t('expensesDialog.action')}>
+                    {Array.isArray(document.expenses) && document.expenses.length > 0 ? (
+                      <button
+                        type="button"
+                        className="button button--ghost button--compact"
+                        onClick={() => onOpenExpenses?.(document)}
+                      >
+                        {t('expensesDialog.viewExpenses').replace('{{count}}', document.expenses.length)}
+                      </button>
+                    ) : (
+                      <span className="muted">{t('expensesDialog.noExpenses')}</span>
+                    )}
                   </td>
                 ) : null}
                 <td data-heading={t('documentList.actions')} className="document-table__actions">
@@ -668,7 +699,16 @@ function App() {
   const [error, setError] = useState(null)
   const [status, setStatus] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [filters, setFilters] = useState({ search: '', client: '', number: '', date: '', ncf: '' })
+  const [filters, setFilters] = useState({
+    search: '',
+    client: '',
+    number: '',
+    dateFrom: '',
+    dateTo: '',
+    month: '',
+    ncf: '',
+  })
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [downloadingId, setDownloadingId] = useState(null)
   const [invoiceGeneratingId, setInvoiceGeneratingId] = useState(null)
   const [undoingQuoteId, setUndoingQuoteId] = useState(null)
@@ -697,7 +737,8 @@ function App() {
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(() => new Set())
   const [isDownloadingSelectedPdf, setIsDownloadingSelectedPdf] = useState(false)
   const [isDownloadingSelectedZip, setIsDownloadingSelectedZip] = useState(false)
-  const [paidFilter, setPaidFilter] = useState('all')
+  const [isDownloadingMonthPdf, setIsDownloadingMonthPdf] = useState(false)
+  const [statusFilter, setStatusFilter] = useState('all')
   const [alerts, setAlerts] = useState([])
   const [isAlertsBellOpen, setIsAlertsBellOpen] = useState(false)
   const [attachmentsDialog, setAttachmentsDialog] = useState({
@@ -708,6 +749,19 @@ function App() {
     isLoading: false,
     isUploading: false,
     deletingId: null,
+    error: null,
+  })
+  const [expensesDialog, setExpensesDialog] = useState({
+    isOpen: false,
+    orderId: null,
+    orderNumber: null,
+    defaultCurrencyCode: 'USD',
+    expenses: [],
+    isLoading: false,
+    isAdding: false,
+    savingId: null,
+    deletingId: null,
+    uploadingId: null,
     error: null,
   })
   const [quoteAttachmentsDialog, setQuoteAttachmentsDialog] = useState({
@@ -1045,12 +1099,12 @@ function App() {
   }, [])
 
   useEffect(() => {
-    setFilters({ search: '', client: '', number: '', date: '', ncf: '' })
+    setFilters({ search: '', client: '', number: '', dateFrom: '', dateTo: '', month: '', ncf: '' })
   }, [activeSection])
 
   useEffect(() => {
     setSelectedInvoiceIds(new Set())
-    setPaidFilter('all')
+    setStatusFilter('all')
   }, [activeSection, viewingTrash])
 
   useEffect(() => {
@@ -1166,7 +1220,7 @@ function App() {
         if (sectionKey === 'quotes') {
           await loadCustomers()
         }
-        return true
+        return responseBody ?? true
       } catch (requestError) {
         setStatus({
           type: 'error',
@@ -1185,7 +1239,9 @@ function App() {
     const searchTerm = filters.search.trim().toLowerCase()
     const clientTerm = filters.client.trim().toLowerCase()
     const numberTerm = filters.number.trim().toLowerCase()
-    const dateTerm = filters.date
+    const dateFromTerm = filters.dateFrom
+    const dateToTerm = filters.dateTo
+    const monthTerm = filters.month
     const ncfTerm = filters.ncf.trim().toLowerCase()
 
     const normalizeDate = (value) => {
@@ -1201,19 +1257,26 @@ function App() {
       return parsed.toISOString().slice(0, 10)
     }
 
-    const appliesPaidFilter = activeSection === 'invoices' && !viewingTrash && paidFilter !== 'all'
-    const paidFiltered = appliesPaidFilter
+    const appliesStatusFilter = activeSection === 'invoices' && !viewingTrash && statusFilter !== 'all'
+    const statusFiltered = appliesStatusFilter
       ? source.filter((document) => {
           const isPaid = Boolean(document.paidAt || document.isPaid)
-          return paidFilter === 'paid' ? isPaid : !isPaid
+          const isSent = Boolean(document.sentAt || document.isSent)
+          if (statusFilter === 'paid') {
+            return isPaid
+          }
+          if (statusFilter === 'sent') {
+            return !isPaid && isSent
+          }
+          return !isPaid && !isSent
         })
       : source
 
-    if (!searchTerm && !clientTerm && !numberTerm && !dateTerm && !ncfTerm) {
-      return paidFiltered
+    if (!searchTerm && !clientTerm && !numberTerm && !dateFromTerm && !dateToTerm && !monthTerm && !ncfTerm) {
+      return statusFiltered
     }
 
-    return paidFiltered.filter((document) => {
+    return statusFiltered.filter((document) => {
       const partyName =
         document.partyName || document.customerName || document.supplierName || ''
       const partyLower = partyName.toLowerCase()
@@ -1225,7 +1288,9 @@ function App() {
       const matchesClient = !clientTerm || partyLower.includes(clientTerm)
       const matchesNumber =
         !numberTerm || numberLower.includes(numberTerm) || quoteNumberLower.includes(numberTerm)
-      const matchesDate = !dateTerm || normalizedDate === dateTerm
+      const matchesDateFrom = !dateFromTerm || normalizedDate >= dateFromTerm
+      const matchesDateTo = !dateToTerm || normalizedDate <= dateToTerm
+      const matchesMonth = !monthTerm || normalizedDate.slice(0, 7) === monthTerm
       const matchesNcf = !ncfTerm || normalizedNcf.includes(ncfTerm)
 
       let matchesSearch = true
@@ -1260,9 +1325,17 @@ function App() {
         matchesSearch = searchable.some((value) => value && value.includes(searchTerm))
       }
 
-      return matchesClient && matchesNumber && matchesDate && matchesNcf && matchesSearch
+      return (
+        matchesClient &&
+        matchesNumber &&
+        matchesDateFrom &&
+        matchesDateTo &&
+        matchesMonth &&
+        matchesNcf &&
+        matchesSearch
+      )
     })
-  }, [documents, trashDocuments, viewingTrash, activeSection, filters, paidFilter])
+  }, [documents, trashDocuments, viewingTrash, activeSection, filters, statusFilter])
 
   const sortedDocuments = useMemo(() => {
     const docs = [...filteredDocuments]
@@ -1307,7 +1380,7 @@ function App() {
   }, [filteredDocuments, sortConfig])
 
   const currentPage = pageBySection[activeSection] ?? 1
-  const totalPages = Math.max(1, Math.ceil(sortedDocuments.length / ROWS_PER_PAGE))
+  const totalPages = Math.max(1, Math.ceil(sortedDocuments.length / pageSize))
 
   const handlePageChange = useCallback(
     (nextPage) => {
@@ -1325,8 +1398,14 @@ function App() {
     }
   }, [currentPage, totalPages, handlePageChange])
 
-  const pageStart = (currentPage - 1) * ROWS_PER_PAGE
-  const paginatedDocuments = sortedDocuments.slice(pageStart, pageStart + ROWS_PER_PAGE)
+  const handlePageSizeChange = useCallback((value) => {
+    const nextSize = Number(value) || DEFAULT_PAGE_SIZE
+    setPageSize(nextSize)
+    setPageBySection({ quotes: 1, invoices: 1, receipts: 1, purchaseOrders: 1, accountsPayable: 1 })
+  }, [])
+
+  const pageStart = (currentPage - 1) * pageSize
+  const paginatedDocuments = sortedDocuments.slice(pageStart, pageStart + pageSize)
   const paginationConfig =
     totalPages > 1
       ? {
@@ -1709,8 +1788,8 @@ function App() {
     [activeSection, loadSection, translate],
   )
 
-  const handlePaidFilterChange = useCallback((value) => {
-    setPaidFilter(value)
+  const handleStatusFilterChange = useCallback((value) => {
+    setStatusFilter(value)
   }, [])
 
   const handleGoToAlert = useCallback((alert) => {
@@ -1916,6 +1995,46 @@ function App() {
     }
   }, [downloadBlobResponse, selectedInvoiceIds, translate])
 
+  const handleDownloadMonthPdf = useCallback(async () => {
+    if (!filters.month) {
+      return
+    }
+
+    const ids = documents.invoices
+      .filter((invoice) => (invoice.date || '').slice(0, 7) === filters.month)
+      .map((invoice) => invoice.id)
+
+    if (ids.length === 0) {
+      setStatus({
+        type: 'error',
+        message: translate('documentList.monthDownloadEmpty'),
+      })
+      return
+    }
+
+    try {
+      setIsDownloadingMonthPdf(true)
+      const response = await apiFetch(`${API_BASE_URL}/Invoices/batch-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+
+      if (!response.ok) {
+        throw new Error(translate('documentList.monthDownloadError'))
+      }
+
+      await downloadBlobResponse(response, `Invoices-${filters.month}.pdf`)
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error.message || translate('documentList.monthDownloadError'),
+      })
+    } finally {
+      setIsDownloadingMonthPdf(false)
+    }
+  }, [documents.invoices, downloadBlobResponse, filters.month, translate])
+
   const handleDownloadSelectedZip = useCallback(async () => {
     const ids = Array.from(selectedInvoiceIds)
     if (ids.length === 0) {
@@ -2035,18 +2154,6 @@ function App() {
       }
     },
     [loadSection, translate],
-  )
-
-  const handlePOSubmit = useCallback(
-    async (payload) => {
-      if (editingPO) {
-        const wasSuccessful = await handleUpdatePO(editingPO.id, payload)
-        if (wasSuccessful) setEditingPO(null)
-        return wasSuccessful
-      }
-      return handleCreate('purchaseOrders', payload)
-    },
-    [editingPO, handleCreate, handleUpdatePO],
   )
 
   // ── Accounts Payable handlers ───────────────────────────────────────────────
@@ -2227,12 +2334,12 @@ function App() {
     [translate],
   )
 
-  const convertQuoteToInvoice = useCallback(
-    async (quoteId, ncfValue, ncfCategory, skipNcf = false) => {
+  const convertOrderToInvoice = useCallback(
+    async (orderId, ncfValue, ncfCategory, skipNcf = false) => {
       const normalizedCategory =
         normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
 
-      const response = await apiFetch(`${API_BASE_URL}/Quotes/${quoteId}/convert`, {
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${orderId}/convert`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -2367,7 +2474,7 @@ function App() {
         if (doc.convertedInvoiceId) {
           await downloadInvoicePdfById(doc.convertedInvoiceId, doc.number || doc.id)
         } else {
-          const conversion = await convertQuoteToInvoice(doc.id, ncfOverride, categoryOverride, skipNcf)
+          const conversion = await convertOrderToInvoice(doc.id, ncfOverride, categoryOverride, skipNcf)
           await downloadInvoicePdfById(conversion.invoiceId, conversion.invoiceNumber || doc.number || doc.id)
         }
 
@@ -2375,7 +2482,7 @@ function App() {
           type: 'success',
           message: translate('pdf.invoiceGenerated'),
         })
-        await Promise.all([loadSection('quotes'), loadSection('invoices')])
+        await Promise.all([loadSection('quotes'), loadSection('invoices'), loadSection('purchaseOrders')])
       } catch (error) {
         const message = error?.message || translate('pdf.invoiceDownloadError')
         setStatus({
@@ -2387,7 +2494,7 @@ function App() {
         setInvoiceGeneratingId(null)
       }
     },
-    [convertQuoteToInvoice, downloadInvoicePdfById, loadSection, setStatus, translate],
+    [convertOrderToInvoice, downloadInvoicePdfById, loadSection, setStatus, translate],
   )
 
   const fetchSuggestedNcf = useCallback(async (requestedCategory) => {
@@ -2613,18 +2720,18 @@ function App() {
 
   const handleUndoConvertedInvoice = useCallback(
     async (doc) => {
-      if (!doc?.id) {
+      if (!doc?.id || !doc?.quoteId) {
         return
       }
 
       try {
         setUndoingQuoteId(doc.id)
-        await undoQuoteConversion(doc.id)
+        await undoQuoteConversion(doc.quoteId)
         setStatus({
           type: 'success',
           message: translate('sections.quotes.undoInvoiceSuccess'),
         })
-        await Promise.all([loadSection('quotes'), loadSection('invoices')])
+        await Promise.all([loadSection('quotes'), loadSection('invoices'), loadSection('purchaseOrders')])
       } catch (error) {
         setStatus({
           type: 'error',
@@ -2771,6 +2878,280 @@ function App() {
       }))
     }
   }, [attachmentsDialog, translate])
+
+  const handleOpenExpensesDialog = useCallback(async (doc) => {
+    if (!doc?.id) return
+
+    setExpensesDialog({
+      isOpen: true,
+      orderId: doc.id,
+      orderNumber: doc.number || doc.id,
+      defaultCurrencyCode: doc.currencyCode || 'USD',
+      expenses: [],
+      isLoading: true,
+      isAdding: false,
+      savingId: null,
+      deletingId: null,
+      uploadingId: null,
+      error: null,
+    })
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${doc.id}/expenses`)
+      if (!response.ok) throw new Error(translate('expensesDialog.loadError'))
+      const data = await response.json()
+      setExpensesDialog((current) => ({
+        ...current,
+        expenses: Array.isArray(data) ? data : [],
+        isLoading: false,
+      }))
+    } catch (err) {
+      setExpensesDialog((current) => ({
+        ...current,
+        isLoading: false,
+        error: err.message || translate('expensesDialog.loadError'),
+      }))
+    }
+  }, [translate])
+
+  const handlePOSubmit = useCallback(
+    async (payload) => {
+      if (editingPO) {
+        const wasSuccessful = await handleUpdatePO(editingPO.id, payload)
+        if (wasSuccessful) setEditingPO(null)
+        return wasSuccessful
+      }
+
+      const created = await handleCreate('purchaseOrders', payload)
+      if (created?.id) {
+        void handleOpenExpensesDialog(created)
+      }
+      return created
+    },
+    [editingPO, handleCreate, handleOpenExpensesDialog, handleUpdatePO],
+  )
+
+  const handleCloseExpensesDialog = useCallback(() => {
+    setExpensesDialog({
+      isOpen: false,
+      orderId: null,
+      orderNumber: null,
+      defaultCurrencyCode: 'USD',
+      expenses: [],
+      isLoading: false,
+      isAdding: false,
+      savingId: null,
+      deletingId: null,
+      uploadingId: null,
+      error: null,
+    })
+    void Promise.all([loadSection('purchaseOrders'), loadSection('quotes')])
+  }, [loadSection])
+
+  const handleAddExpenseRow = useCallback(async () => {
+    const { orderId, defaultCurrencyCode } = expensesDialog
+    if (!orderId) return
+
+    setExpensesDialog((current) => ({ ...current, isAdding: true, error: null }))
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${orderId}/expenses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: '',
+          amount: 0,
+          currencyCode: defaultCurrencyCode || 'USD',
+          hasInvoice: false,
+          rnc: null,
+        }),
+      })
+
+      if (!response.ok) throw new Error(translate('expensesDialog.addError'))
+
+      const newExpense = await response.json()
+      setExpensesDialog((current) => ({
+        ...current,
+        expenses: [...current.expenses, newExpense],
+        isAdding: false,
+      }))
+    } catch (err) {
+      setExpensesDialog((current) => ({
+        ...current,
+        isAdding: false,
+        error: err.message || translate('expensesDialog.addError'),
+      }))
+    }
+  }, [expensesDialog, translate])
+
+  const handleExpenseFieldChange = useCallback((expenseId, field, value) => {
+    setExpensesDialog((current) => ({
+      ...current,
+      expenses: current.expenses.map((expense) =>
+        expense.id === expenseId ? { ...expense, [field]: value } : expense,
+      ),
+    }))
+  }, [])
+
+  const handleSaveExpenseRow = useCallback(async (expenseId) => {
+    const { orderId, expenses } = expensesDialog
+    const expense = expenses.find((e) => e.id === expenseId)
+    if (!orderId || !expense) return
+
+    setExpensesDialog((current) => ({ ...current, savingId: expenseId, error: null }))
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${orderId}/expenses/${expenseId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: expense.description,
+          amount: Number(expense.amount) || 0,
+          currencyCode: expense.currencyCode,
+          hasInvoice: Boolean(expense.hasInvoice),
+          rnc: expense.hasInvoice ? (expense.rnc || null) : null,
+        }),
+      })
+
+      if (!response.ok) throw new Error(translate('expensesDialog.saveError'))
+
+      const updated = await response.json()
+      setExpensesDialog((current) => ({
+        ...current,
+        expenses: current.expenses.map((e) => (e.id === expenseId ? updated : e)),
+        savingId: null,
+      }))
+      await Promise.all([loadSection('purchaseOrders'), loadSection('quotes')])
+    } catch (err) {
+      setExpensesDialog((current) => ({
+        ...current,
+        savingId: null,
+        error: err.message || translate('expensesDialog.saveError'),
+      }))
+    }
+  }, [expensesDialog, loadSection, translate])
+
+  const handleDeleteExpenseRow = useCallback(async (expenseId) => {
+    const { orderId } = expensesDialog
+    if (!orderId) return
+
+    setExpensesDialog((current) => ({ ...current, deletingId: expenseId, error: null }))
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${orderId}/expenses/${expenseId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) throw new Error(translate('expensesDialog.deleteError'))
+
+      setExpensesDialog((current) => ({
+        ...current,
+        expenses: current.expenses.filter((e) => e.id !== expenseId),
+        deletingId: null,
+      }))
+      await Promise.all([loadSection('purchaseOrders'), loadSection('quotes')])
+    } catch (err) {
+      setExpensesDialog((current) => ({
+        ...current,
+        deletingId: null,
+        error: err.message || translate('expensesDialog.deleteError'),
+      }))
+    }
+  }, [expensesDialog, loadSection, translate])
+
+  const handleUploadExpenseReceipt = useCallback(async (expenseId, file) => {
+    const { orderId } = expensesDialog
+    if (!orderId || !file) return
+
+    setExpensesDialog((current) => ({ ...current, uploadingId: expenseId, error: null }))
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await apiFetch(
+        `${API_BASE_URL}/PurchaseOrders/${orderId}/expenses/${expenseId}/receipt`,
+        { method: 'POST', body: formData },
+      )
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || body?.title || translate('expensesDialog.receiptUploadError'))
+      }
+
+      const receiptInfo = await response.json()
+      setExpensesDialog((current) => ({
+        ...current,
+        expenses: current.expenses.map((e) => (e.id === expenseId ? { ...e, ...receiptInfo } : e)),
+        uploadingId: null,
+      }))
+    } catch (err) {
+      setExpensesDialog((current) => ({
+        ...current,
+        uploadingId: null,
+        error: err.message || translate('expensesDialog.receiptUploadError'),
+      }))
+    }
+  }, [expensesDialog, translate])
+
+  const handleDownloadExpenseReceipt = useCallback(async (expense) => {
+    const { orderId } = expensesDialog
+    if (!orderId) return
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/PurchaseOrders/${orderId}/expenses/${expense.id}/receipt`,
+      )
+      if (!response.ok) throw new Error(translate('pdf.downloadError'))
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = window.document.createElement('a')
+      link.href = url
+      link.download = expense.receiptFileName || `receipt-${expense.id}`
+      window.document.body.appendChild(link)
+      link.click()
+      window.document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setExpensesDialog((current) => ({
+        ...current,
+        error: translate('pdf.downloadError'),
+      }))
+    }
+  }, [expensesDialog, translate])
+
+  const handleDeleteExpenseReceipt = useCallback(async (expenseId) => {
+    const { orderId } = expensesDialog
+    if (!orderId) return
+
+    setExpensesDialog((current) => ({ ...current, uploadingId: expenseId, error: null }))
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/PurchaseOrders/${orderId}/expenses/${expenseId}/receipt`,
+        { method: 'DELETE' },
+      )
+
+      if (!response.ok) throw new Error(translate('expensesDialog.receiptDeleteError'))
+
+      setExpensesDialog((current) => ({
+        ...current,
+        expenses: current.expenses.map((e) =>
+          e.id === expenseId
+            ? { ...e, receiptFileName: null, receiptContentType: null, receiptFileSize: null, receiptUploadedAt: null }
+            : e,
+        ),
+        uploadingId: null,
+      }))
+    } catch (err) {
+      setExpensesDialog((current) => ({
+        ...current,
+        uploadingId: null,
+        error: err.message || translate('expensesDialog.receiptDeleteError'),
+      }))
+    }
+  }, [expensesDialog, translate])
 
   const handleOpenQuoteAttachmentsDialog = useCallback(async (doc) => {
     if (!doc?.id) return
@@ -2952,44 +3333,9 @@ function App() {
           onClick: handleDuplicateQuote,
           variant: 'button--ghost',
         },
-        ...(canCreateInvoice ? [{
-          label: (doc) =>
-            doc?.convertedInvoiceId || doc?.convertedAt || doc?.invoiceGeneratedAt || doc?.ncfNumber
-              ? translate('documentList.downloadInvoice')
-              : translate('documentList.generateInvoice'),
-          loadingLabel: translate('documentList.generatingInvoice'),
-          busyId: invoiceGeneratingId,
-          onClick: (doc) => {
-            if (doc?.convertedInvoiceId || doc?.convertedAt) {
-              void handleGenerateInvoice(doc).catch(() => {})
-              return
-            }
-
-            void handleOpenNcfDialog(doc, 'generate')
-          },
-          variant: 'button--ghost',
-        }] : []),
-        ...(canCreateInvoice ? [{
-          label: translate('documentList.editNcf'),
-          loadingLabel: translate('documentList.editingNcf'),
-          busyId: updatingNcfId,
-          isVisible: (doc) => Boolean(doc?.convertedInvoiceId || doc?.convertedAt),
-          onClick: (doc) => {
-            void handleOpenNcfDialog(doc, 'edit')
-          },
-          variant: 'button--ghost',
-        }] : []),
-        ...(canDelete ? [{
-          label: translate('documentList.undoInvoice'),
-          loadingLabel: translate('documentList.undoingInvoice'),
-          busyId: undoingQuoteId,
-          isVisible: (doc) => Boolean(doc?.convertedInvoiceId || doc?.convertedAt),
-          onClick: handleUndoConvertedInvoice,
-          variant: 'button--ghost',
-        }] : []),
         {
-          label: translate('purchaseOrderForm.logExpenseAction'),
-          loadingLabel: translate('purchaseOrderForm.logExpenseAction'),
+          label: translate('purchaseOrderForm.createOrderAction'),
+          loadingLabel: translate('purchaseOrderForm.createOrderAction'),
           busyId: null,
           onClick: handleLogExpense,
           variant: 'button--ghost',
@@ -3062,6 +3408,13 @@ function App() {
       return [
         previewAction,
         {
+          label: translate('expensesDialog.action'),
+          loadingLabel: translate('expensesDialog.action'),
+          busyId: null,
+          onClick: handleOpenExpensesDialog,
+          variant: 'button--ghost',
+        },
+        {
           label: translate('purchaseOrderForm.attachmentsAction'),
           loadingLabel: translate('purchaseOrderForm.attachmentsLoading'),
           busyId: null,
@@ -3079,7 +3432,7 @@ function App() {
           label: translate('purchaseOrderForm.markInProgressAction'),
           loadingLabel: translate('purchaseOrderForm.markInProgressLoading'),
           busyId: markingPoStatusId,
-          isVisible: (doc) => (doc?.status || 'Pendiente') === 'Pendiente',
+          isVisible: (doc) => (doc?.status || 'Pendiente') === 'Pendiente' && !doc?.convertedInvoiceId,
           onClick: (doc) => handleUpdatePurchaseOrderStatus(doc, 'EnProceso'),
           variant: 'button--ghost',
         },
@@ -3087,10 +3440,53 @@ function App() {
           label: translate('purchaseOrderForm.markCompletedAction'),
           loadingLabel: translate('purchaseOrderForm.markCompletedLoading'),
           busyId: markingPoStatusId,
-          isVisible: (doc) => (doc?.status || 'Pendiente') !== 'Completada',
+          isVisible: (doc) => (doc?.status || 'Pendiente') !== 'Completada' && !doc?.convertedInvoiceId,
           onClick: (doc) => handleUpdatePurchaseOrderStatus(doc, 'Completada'),
           variant: 'button--ghost',
         },
+        ...(canCreateInvoice ? [{
+          label: (doc) =>
+            doc?.convertedInvoiceId
+              ? translate('documentList.downloadInvoice')
+              : translate('documentList.generateInvoice'),
+          loadingLabel: translate('documentList.generatingInvoice'),
+          busyId: invoiceGeneratingId,
+          onClick: (doc) => {
+            if (doc?.convertedInvoiceId) {
+              void handleGenerateInvoice(doc).catch(() => {})
+              return
+            }
+
+            if ((doc?.status || 'Pendiente') !== 'Completada') {
+              setStatus({
+                type: 'error',
+                message: translate('documentList.orderNotCompletedError'),
+              })
+              return
+            }
+
+            void handleOpenNcfDialog(doc, 'generate')
+          },
+          variant: 'button--ghost',
+        }] : []),
+        ...(canCreateInvoice ? [{
+          label: translate('documentList.editNcf'),
+          loadingLabel: translate('documentList.editingNcf'),
+          busyId: updatingNcfId,
+          isVisible: (doc) => Boolean(doc?.convertedInvoiceId),
+          onClick: (doc) => {
+            void handleOpenNcfDialog(doc, 'edit')
+          },
+          variant: 'button--ghost',
+        }] : []),
+        ...(canDelete ? [{
+          label: translate('documentList.undoInvoice'),
+          loadingLabel: translate('documentList.undoingInvoice'),
+          busyId: undoingQuoteId,
+          isVisible: (doc) => Boolean(doc?.convertedInvoiceId),
+          onClick: handleUndoConvertedInvoice,
+          variant: 'button--ghost',
+        }] : []),
       ]
     }
 
@@ -3136,6 +3532,7 @@ function App() {
     handleMarkInvoiceUnsent,
     handleUpdatePurchaseOrderStatus,
     handleOpenAttachmentsDialog,
+    handleOpenExpensesDialog,
     handleOpenNcfDialog,
     handleOpenQuoteAttachmentsDialog,
     handlePreviewDocument,
@@ -3623,13 +4020,33 @@ function App() {
                   <path d="M13.5 3v3" />
                   <path d="M3 8.5h14" />
                 </UiIcon>
-                <span>{translate('filters.dateLabel')}</span>
+                <span>{translate('filters.dateFromLabel')}</span>
               </span>
               <input
                 type="date"
-                value={filters.date}
+                value={filters.dateFrom}
+                max={filters.dateTo || undefined}
                 onChange={(event) =>
-                  setFilters((current) => ({ ...current, date: event.target.value }))
+                  setFilters((current) => ({ ...current, dateFrom: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              <span className="field-label">
+                <UiIcon>
+                  <rect x="3" y="4.5" width="14" height="12" rx="2" />
+                  <path d="M6.5 3v3" />
+                  <path d="M13.5 3v3" />
+                  <path d="M3 8.5h14" />
+                </UiIcon>
+                <span>{translate('filters.dateToLabel')}</span>
+              </span>
+              <input
+                type="date"
+                value={filters.dateTo}
+                min={filters.dateFrom || undefined}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, dateTo: event.target.value }))
                 }
               />
             </label>
@@ -3654,28 +4071,67 @@ function App() {
               <label>
                 <span className="field-label">
                   <UiIcon>
+                    <rect x="3" y="4.5" width="14" height="12" rx="2" />
+                    <path d="M6.5 3v3" />
+                    <path d="M13.5 3v3" />
+                    <path d="M3 8.5h14" />
+                  </UiIcon>
+                  <span>{translate('filters.monthLabel')}</span>
+                </span>
+                <input
+                  type="month"
+                  value={filters.month}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, month: event.target.value }))
+                  }
+                />
+              </label>
+            ) : null}
+            {isInvoicesSection && !viewingTrash ? (
+              <label>
+                <span className="field-label">
+                  <UiIcon>
                     <circle cx="10" cy="10" r="7" />
                     <path d="M7 10.5l2 2 4-4.5" />
                   </UiIcon>
                   <span>{translate('documentList.paidStatusLabel')}</span>
                 </span>
                 <ThemedSelect
-                  value={paidFilter}
-                  onChange={handlePaidFilterChange}
+                  value={statusFilter}
+                  onChange={handleStatusFilterChange}
                   ariaLabel={translate('documentList.paidStatusLabel')}
                   options={[
                     { value: 'all', label: translate('documentList.paidStatusAll') },
                     { value: 'paid', label: translate('documentList.paidStatusPaid') },
-                    { value: 'unpaid', label: translate('documentList.paidStatusUnpaid') },
+                    { value: 'sent', label: translate('documentList.paidStatusSent') },
+                    { value: 'pending', label: translate('documentList.paidStatusPending') },
                   ]}
                 />
               </label>
             ) : null}
+            <label>
+              <span className="field-label">
+                <UiIcon>
+                  <path d="M4 6h12" />
+                  <path d="M4 10h12" />
+                  <path d="M4 14h12" />
+                </UiIcon>
+                <span>{translate('pagination.pageSizeLabel')}</span>
+              </span>
+              <ThemedSelect
+                value={String(pageSize)}
+                onChange={handlePageSizeChange}
+                ariaLabel={translate('pagination.pageSizeLabel')}
+                options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
+              />
+            </label>
           </div>
           <button
             type="button"
             className="button button--secondary button--compact button--icon-text"
-            onClick={() => setFilters({ search: '', client: '', number: '', date: '', ncf: '' })}
+            onClick={() =>
+              setFilters({ search: '', client: '', number: '', dateFrom: '', dateTo: '', month: '', ncf: '' })
+            }
           >
             <UiIcon className="ui-icon ui-icon--button">
               <path d="M16 5v4h-4" />
@@ -3690,6 +4146,21 @@ function App() {
             {status.message}
           </div>
         )}
+
+        {isInvoicesSection && !viewingTrash && filters.month ? (
+          <div className="bulk-actions">
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={handleDownloadMonthPdf}
+              disabled={isDownloadingMonthPdf}
+            >
+              {isDownloadingMonthPdf
+                ? translate('documentList.downloadingMonthPdf')
+                : translate('documentList.downloadMonthPdf')}
+            </button>
+          </div>
+        ) : null}
 
         {isInvoicesSection && !viewingTrash && selectedInvoiceIds.size > 0 ? (
           <div className="bulk-actions">
@@ -3744,6 +4215,7 @@ function App() {
             selectedIds={selectedInvoiceIds}
             onToggleSelect={handleToggleSelectInvoice}
             onToggleSelectAll={handleToggleSelectAllInvoices}
+            onOpenExpenses={handleOpenExpensesDialog}
           />
         )}
       </section>
@@ -3987,6 +4459,233 @@ function App() {
           </div>
         </Modal>
       ) : null}
+      {expensesDialog.isOpen ? (() => {
+        const linkedOrder = documents.purchaseOrders.find((po) => po.id === expensesDialog.orderId)
+        const linkedQuote = linkedOrder?.quoteId
+          ? documents.quotes.find((quote) => quote.id === linkedOrder.quoteId)
+          : null
+        const quoteLines = Array.isArray(linkedQuote?.lines) ? linkedQuote.lines : []
+
+        return (
+        <Modal
+          isOpen={expensesDialog.isOpen}
+          onClose={handleCloseExpensesDialog}
+          title={translate('expensesDialog.heading')}
+          description={expensesDialog.orderNumber || ''}
+          eyebrow={translate('sections.purchaseOrders.title')}
+          className="modal--wide"
+        >
+          <div className="modal-body">
+            {expensesDialog.error ? (
+              <div className="banner banner--error" role="alert">
+                {expensesDialog.error}
+              </div>
+            ) : null}
+            {linkedQuote && quoteLines.length > 0 ? (
+              <div className="form-section">
+                <div className="form-section__header">
+                  <h4>
+                    {translate('expensesDialog.quoteItemsHeading')} — {linkedQuote.number}
+                  </h4>
+                </div>
+                <div className="line-table-wrapper">
+                  <table className="line-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">{translate('purchaseOrderForm.descriptionLabel')}</th>
+                        <th scope="col">{translate('purchaseOrderForm.quantityLabel')}</th>
+                        <th scope="col">{translate('purchaseOrderForm.unitPriceLabel')}</th>
+                        <th scope="col">{translate('documentList.total')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quoteLines.map((line) => (
+                        <tr key={line.id}>
+                          <td data-heading={translate('purchaseOrderForm.descriptionLabel')}>
+                            {line.description}
+                          </td>
+                          <td data-heading={translate('purchaseOrderForm.quantityLabel')}>
+                            {line.quantity} {line.unitOfMeasure}
+                          </td>
+                          <td data-heading={translate('purchaseOrderForm.unitPriceLabel')}>
+                            {formatCurrency(line.unitPrice, linkedQuote.currencyCode, linkedQuote.cultureName)}
+                          </td>
+                          <td data-heading={translate('documentList.total')}>
+                            {formatCurrency(line.lineTotal, linkedQuote.currencyCode, linkedQuote.cultureName)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+            {expensesDialog.isLoading ? (
+              <p className="muted">{translate('expensesDialog.loading')}</p>
+            ) : expensesDialog.expenses.length === 0 ? (
+              <p className="muted">{translate('expensesDialog.empty')}</p>
+            ) : (
+              <div className="line-table-wrapper">
+                <table className="line-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">{translate('expensesDialog.descriptionLabel')}</th>
+                      <th scope="col">{translate('expensesDialog.amountLabel')}</th>
+                      <th scope="col">{translate('expensesDialog.currencyLabel')}</th>
+                      <th scope="col">{translate('expensesDialog.hasInvoiceLabel')}</th>
+                      <th scope="col">{translate('expensesDialog.rncLabel')}</th>
+                      <th scope="col">{translate('expensesDialog.receiptLabel')}</th>
+                      <th scope="col" className="line-table__actions-heading">
+                        {translate('documentList.actions')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expensesDialog.expenses.map((expense) => {
+                      const isSaving = expensesDialog.savingId === expense.id
+                      const isDeleting = expensesDialog.deletingId === expense.id
+                      const isUploading = expensesDialog.uploadingId === expense.id
+                      return (
+                        <tr key={expense.id}>
+                          <td data-heading={translate('expensesDialog.descriptionLabel')}>
+                            <textarea
+                              className="line-table__textarea"
+                              rows="2"
+                              value={expense.description}
+                              onChange={(event) =>
+                                handleExpenseFieldChange(expense.id, 'description', event.target.value)
+                              }
+                            />
+                          </td>
+                          <td data-heading={translate('expensesDialog.amountLabel')}>
+                            <input
+                              type="number"
+                              className="line-table__input"
+                              min="0"
+                              step="0.01"
+                              value={expense.amount}
+                              onChange={(event) =>
+                                handleExpenseFieldChange(expense.id, 'amount', event.target.value)
+                              }
+                            />
+                          </td>
+                          <td data-heading={translate('expensesDialog.currencyLabel')}>
+                            <ThemedSelect
+                              value={expense.currencyCode}
+                              onChange={(value) => handleExpenseFieldChange(expense.id, 'currencyCode', value)}
+                              ariaLabel={translate('expensesDialog.currencyLabel')}
+                              options={CURRENCY_CODES.map((code) => ({ value: code, label: code }))}
+                            />
+                          </td>
+                          <td data-heading={translate('expensesDialog.hasInvoiceLabel')}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(expense.hasInvoice)}
+                              onChange={(event) =>
+                                handleExpenseFieldChange(expense.id, 'hasInvoice', event.target.checked)
+                              }
+                            />
+                          </td>
+                          <td data-heading={translate('expensesDialog.rncLabel')}>
+                            <input
+                              type="text"
+                              className="line-table__input"
+                              value={expense.rnc || ''}
+                              disabled={!expense.hasInvoice}
+                              placeholder={expense.hasInvoice ? '131456789' : '—'}
+                              onChange={(event) =>
+                                handleExpenseFieldChange(expense.id, 'rnc', event.target.value)
+                              }
+                            />
+                          </td>
+                          <td data-heading={translate('expensesDialog.receiptLabel')}>
+                            {expense.hasInvoice ? (
+                              <div className="attachments-list__actions">
+                                {expense.receiptFileName ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="button button--secondary button--compact"
+                                      onClick={() => handleDownloadExpenseReceipt(expense)}
+                                    >
+                                      {translate('expensesDialog.receiptDownload')}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="button button--ghost button--compact"
+                                      onClick={() => handleDeleteExpenseReceipt(expense.id)}
+                                      disabled={isUploading}
+                                    >
+                                      {translate('expensesDialog.receiptRemove')}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <label className="button button--secondary button--compact" style={{ cursor: 'pointer' }}>
+                                    {isUploading
+                                      ? translate('expensesDialog.receiptUploading')
+                                      : translate('expensesDialog.receiptUpload')}
+                                    <input
+                                      type="file"
+                                      style={{ display: 'none' }}
+                                      disabled={isUploading}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0]
+                                        if (file) {
+                                          event.target.value = ''
+                                          void handleUploadExpenseReceipt(expense.id, file)
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td className="line-table__actions">
+                            <button
+                              type="button"
+                              className="button button--secondary button--compact"
+                              onClick={() => handleSaveExpenseRow(expense.id)}
+                              disabled={isSaving}
+                            >
+                              {isSaving ? translate('expensesDialog.saving') : translate('expensesDialog.save')}
+                            </button>
+                            {canDelete ? (
+                              <button
+                                type="button"
+                                className="button button--ghost button--compact"
+                                onClick={() => handleDeleteExpenseRow(expense.id)}
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? translate('expensesDialog.deleting') : translate('expensesDialog.delete')}
+                              </button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="attachments-upload">
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={handleAddExpenseRow}
+                disabled={expensesDialog.isAdding}
+              >
+                {expensesDialog.isAdding
+                  ? translate('expensesDialog.adding')
+                  : translate('expensesDialog.addExpense')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+        )
+      })() : null}
       {quoteAttachmentsDialog.isOpen ? (
         <Modal
           isOpen={quoteAttachmentsDialog.isOpen}
