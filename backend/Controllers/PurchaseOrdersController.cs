@@ -435,6 +435,7 @@ public class PurchaseOrdersController : ControllerBase
             {
                 e.Id,
                 e.Description,
+                e.Date,
                 e.Amount,
                 e.CurrencyCode,
                 e.HasInvoice,
@@ -470,6 +471,7 @@ public class PurchaseOrdersController : ControllerBase
         {
             OrderId = id,
             Description = request.Description.Trim(),
+            Date = request.Date,
             Amount = request.Amount,
             CurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode) ? "USD" : request.CurrencyCode.Trim().ToUpperInvariant(),
             HasInvoice = request.HasInvoice,
@@ -486,6 +488,7 @@ public class PurchaseOrdersController : ControllerBase
         {
             expense.Id,
             expense.Description,
+            expense.Date,
             expense.Amount,
             expense.CurrencyCode,
             expense.HasInvoice,
@@ -521,6 +524,7 @@ public class PurchaseOrdersController : ControllerBase
         }
 
         expense.Description = request.Description.Trim();
+        expense.Date = request.Date;
         expense.Amount = request.Amount;
         expense.CurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode) ? "USD" : request.CurrencyCode.Trim().ToUpperInvariant();
         expense.HasInvoice = request.HasInvoice;
@@ -533,6 +537,7 @@ public class PurchaseOrdersController : ControllerBase
         {
             expense.Id,
             expense.Description,
+            expense.Date,
             expense.Amount,
             expense.CurrencyCode,
             expense.HasInvoice,

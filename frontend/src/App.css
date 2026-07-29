@@ -1648,9 +1648,27 @@ textarea:focus {
   gap: 1.25rem;
 }
 
+.tab-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
 .insights__toolbar {
   display: flex;
   justify-content: flex-end;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.accounting-rate-input {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.accounting-rate-input input[type='number'] {
+  width: 5rem;
 }
 
 .insights__toolbar .toolbar__control select {

@@ -25,6 +25,7 @@ public class IORManagerContext : DbContext
     public DbSet<FiscalRegime> FiscalRegimes => Set<FiscalRegime>();
     public DbSet<PurchaseOrderAttachment> PurchaseOrderAttachments => Set<PurchaseOrderAttachment>();
     public DbSet<OrderExpense> OrderExpenses => Set<OrderExpense>();
+    public DbSet<AccountingSettings> AccountingSettings => Set<AccountingSettings>();
     public DbSet<QuoteAttachment> QuoteAttachments => Set<QuoteAttachment>();
     public DbSet<AccountPayable> AccountsPayable => Set<AccountPayable>();
     public DbSet<User> Users => Set<User>();
@@ -44,6 +45,7 @@ public class IORManagerContext : DbContext
         ConfigureFiscalRegime(modelBuilder);
         ConfigurePurchaseOrderAttachment(modelBuilder);
         ConfigureOrderExpense(modelBuilder);
+        ConfigureAccountingSettings(modelBuilder);
         ConfigureQuoteAttachment(modelBuilder);
         ConfigurePurchaseOrderQuoteLink(modelBuilder);
         ConfigureAccountPayable(modelBuilder);
@@ -247,10 +249,22 @@ public class IORManagerContext : DbContext
 
     private static void ConfigureOrderExpense(ModelBuilder modelBuilder)
     {
+        var dateConverter = new ValueConverter<DateOnly, DateTime>(
+            dateOnly => dateOnly.ToDateTime(TimeOnly.MinValue),
+            dateTime => DateOnly.FromDateTime(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)));
+
+        var dateComparer = new ValueComparer<DateOnly>(
+            (left, right) => left == right,
+            dateOnly => dateOnly.GetHashCode(),
+            dateOnly => dateOnly);
+
         modelBuilder.Entity<OrderExpense>(builder =>
         {
             builder.HasKey(e => e.Id);
             builder.Property(e => e.Description).HasMaxLength(300).IsRequired();
+            builder.Property(e => e.Date)
+                .HasConversion(dateConverter)
+                .Metadata.SetValueComparer(dateComparer);
             builder.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
             builder.Property(e => e.Rnc).HasMaxLength(20);
             builder.Property(e => e.ReceiptFileName).HasMaxLength(255);
@@ -261,6 +275,16 @@ public class IORManagerContext : DbContext
                 .WithMany(po => po.Expenses)
                 .HasForeignKey(e => e.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureAccountingSettings(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AccountingSettings>(builder =>
+        {
+            builder.HasKey(settings => settings.Id);
+            builder.Property(settings => settings.Id).ValueGeneratedNever();
+            builder.HasData(new AccountingSettings { Id = 1, IsrRatePercent = 0m });
         });
     }
 

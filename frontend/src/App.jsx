@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useAuth, apiFetch } from './contexts/AuthContext'
 import InvoiceForm from './components/InvoiceForm'
 import Insights from './components/Insights'
+import AccountingSummary from './components/AccountingSummary'
 import ReceiptForm from './components/ReceiptForm'
 import PurchaseOrderForm from './components/PurchaseOrderForm'
 import AccountPayableForm from './components/AccountPayableForm'
@@ -688,6 +689,7 @@ function App() {
   }, [theme])
 
   const [activeSection, setActiveSection] = useState('quotes')
+  const [analysisTab, setAnalysisTab] = useState('trends')
   const [documents, setDocuments] = useState({
     quotes: [],
     invoices: [],
@@ -2960,6 +2962,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           description: '',
+          date: new Date().toISOString().slice(0, 10),
           amount: 0,
           currencyCode: defaultCurrencyCode || 'USD',
           hasInvoice: false,
@@ -3006,6 +3009,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           description: expense.description,
+          date: expense.date,
           amount: Number(expense.amount) || 0,
           currencyCode: expense.currencyCode,
           hasInvoice: Boolean(expense.hasInvoice),
@@ -3853,15 +3857,44 @@ function App() {
             <h2>{config.title}</h2>
             <p>{config.description}</p>
           </div>
-          <Insights
-            apiBaseUrl={API_BASE_URL}
-            currency={defaultCurrency}
-            currencyOptions={CURRENCY_CODES}
-            onCurrencyChange={setDefaultCurrency}
-            t={translate}
-            formatCurrency={formatCurrency}
-            locale={locale}
-          />
+          <div className="tab-toggle" role="tablist">
+            <button
+              type="button"
+              className={`button ${analysisTab === 'trends' ? '' : 'button--ghost'}`}
+              onClick={() => setAnalysisTab('trends')}
+              aria-selected={analysisTab === 'trends'}
+              role="tab"
+            >
+              {translate('accounting.trendsTab')}
+            </button>
+            <button
+              type="button"
+              className={`button ${analysisTab === 'taxes' ? '' : 'button--ghost'}`}
+              onClick={() => setAnalysisTab('taxes')}
+              aria-selected={analysisTab === 'taxes'}
+              role="tab"
+            >
+              {translate('accounting.taxesTab')}
+            </button>
+          </div>
+          {analysisTab === 'trends' ? (
+            <Insights
+              apiBaseUrl={API_BASE_URL}
+              currency={defaultCurrency}
+              currencyOptions={CURRENCY_CODES}
+              onCurrencyChange={setDefaultCurrency}
+              t={translate}
+              formatCurrency={formatCurrency}
+              locale={locale}
+            />
+          ) : (
+            <AccountingSummary
+              apiBaseUrl={API_BASE_URL}
+              t={translate}
+              formatCurrency={formatCurrency}
+              locale={locale}
+            />
+          )}
         </section>
       ) : null}
 
@@ -4530,6 +4563,7 @@ function App() {
                   <thead>
                     <tr>
                       <th scope="col">{translate('expensesDialog.descriptionLabel')}</th>
+                      <th scope="col">{translate('expensesDialog.dateLabel')}</th>
                       <th scope="col">{translate('expensesDialog.amountLabel')}</th>
                       <th scope="col">{translate('expensesDialog.currencyLabel')}</th>
                       <th scope="col">{translate('expensesDialog.hasInvoiceLabel')}</th>
@@ -4554,6 +4588,16 @@ function App() {
                               value={expense.description}
                               onChange={(event) =>
                                 handleExpenseFieldChange(expense.id, 'description', event.target.value)
+                              }
+                            />
+                          </td>
+                          <td data-heading={translate('expensesDialog.dateLabel')}>
+                            <input
+                              type="date"
+                              className="line-table__input"
+                              value={expense.date ? String(expense.date).slice(0, 10) : ''}
+                              onChange={(event) =>
+                                handleExpenseFieldChange(expense.id, 'date', event.target.value)
                               }
                             />
                           </td>

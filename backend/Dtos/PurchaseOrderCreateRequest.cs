@@ -70,6 +70,8 @@ public record OrderExpenseCreateRequest
     [Required(AllowEmptyStrings = true)]
     public string Description { get; init; } = string.Empty;
 
+    public DateOnly Date { get; init; } = DateOnly.FromDateTime(DateTime.UtcNow);
+
     [Range(typeof(decimal), "0.0", "79228162514264337593543950335")]
     public decimal Amount { get; init; } = 0m;
 
@@ -87,6 +89,8 @@ public record OrderExpenseUpdateRequest
 {
     [Required(AllowEmptyStrings = true)]
     public string Description { get; init; } = string.Empty;
+
+    public DateOnly Date { get; init; } = DateOnly.FromDateTime(DateTime.UtcNow);
 
     [Range(typeof(decimal), "0.0", "79228162514264337593543950335")]
     public decimal Amount { get; init; } = 0m;

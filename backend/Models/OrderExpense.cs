@@ -15,6 +15,10 @@ public class OrderExpense
     [MaxLength(300)]
     public string Description { get; set; } = string.Empty;
 
+    /// <summary>The date the expense actually happened (for tax-period reporting) — not necessarily the same
+    /// day it was logged in the app (<see cref="CreatedAt"/>).</summary>
+    public DateOnly Date { get; set; }
+
     [Range(typeof(decimal), "0.0", "79228162514264337593543950335")]
     public decimal Amount { get; set; }
 
