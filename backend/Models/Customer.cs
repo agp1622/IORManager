@@ -25,6 +25,11 @@ public class Customer
     /// </summary>
     public int DefaultPaymentTermsDays { get; set; } = 30;
 
+    /// <summary>NCF category (e.g. B01, B02, B14) used by default when generating invoices for this
+    /// customer. Null means no override — falls back to <see cref="Services.NcfCategoryCatalog.DefaultCategoryCode"/>.</summary>
+    [MaxLength(3)]
+    public string? DefaultNcfCategory { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

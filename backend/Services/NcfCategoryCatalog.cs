@@ -124,6 +124,28 @@ public static class NcfCategoryCatalog
         return $"{definition.Code}{value.ToString($"D{definition.SequenceLength}")}";
     }
 
+    /// <summary>
+    /// Parses the numeric sequence value out of an NCF that belongs to the given category,
+    /// tolerating legacy/malformed rows (wrong prefix, non-numeric suffix) by returning false.
+    /// </summary>
+    public static bool TryParseSequenceValue(string categoryCode, string? ncfNumber, out long value)
+    {
+        value = 0;
+        if (!TryGetByCode(categoryCode, out var definition) || string.IsNullOrWhiteSpace(ncfNumber))
+        {
+            return false;
+        }
+
+        var compact = ToCompactNcfNumber(ncfNumber);
+        if (!compact.StartsWith(definition.Code, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var suffix = compact[definition.Code.Length..];
+        return suffix.Length > 0 && NumericRegex.IsMatch(suffix) && long.TryParse(suffix, out value);
+    }
+
     private static string ToCompactNcfNumber(string value)
     {
         var trimmed = value.Trim().ToUpperInvariant();

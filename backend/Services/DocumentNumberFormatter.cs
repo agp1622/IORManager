@@ -25,4 +25,28 @@ public static class DocumentNumberFormatter
             ? $"INV-{trimmed[3..]}"
             : $"INV-{trimmed}";
     }
+
+    public static string ToOrderNumber(string? sourceNumber)
+    {
+        if (string.IsNullOrWhiteSpace(sourceNumber))
+        {
+            return "ORD-000000";
+        }
+
+        var trimmed = sourceNumber.Trim();
+
+        if (trimmed.StartsWith("ORD-", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        if (trimmed.StartsWith("QUO-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ORD-" + trimmed[4..];
+        }
+
+        return trimmed.StartsWith("ORD", StringComparison.OrdinalIgnoreCase)
+            ? $"ORD-{trimmed[3..]}"
+            : $"ORD-{trimmed}";
+    }
 }

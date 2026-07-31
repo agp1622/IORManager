@@ -5,15 +5,15 @@ namespace IORManager.Dtos;
 
 public record PurchaseOrderCreateRequest
 {
-    [Required]
-    public string PurchaseOrderNumber { get; init; } = string.Empty;
+    /// <summary>Optional — auto-generated (ORD-NNNNNN) when left blank.</summary>
+    public string? PurchaseOrderNumber { get; init; }
 
     [Required]
     public DateOnly PurchaseOrderDate { get; init; }
         = DateOnly.FromDateTime(DateTime.UtcNow);
 
-    [Required]
-    public string SupplierName { get; init; } = string.Empty;
+    /// <summary>Optional — defaults to the linked quote's customer name, or "N/A", when left blank.</summary>
+    public string? SupplierName { get; init; }
 
     /// <summary>Optional: the quote this expense belongs to (for project cost tracking).</summary>
     public Guid? QuoteId { get; init; }
@@ -31,9 +31,9 @@ public record PurchaseOrderCreateRequest
         var purchaseOrder = new PurchaseOrder
         {
             Id = Guid.NewGuid(),
-            Number = PurchaseOrderNumber,
+            Number = PurchaseOrderNumber?.Trim() ?? string.Empty,
             Date = PurchaseOrderDate,
-            SupplierName = SupplierName,
+            SupplierName = SupplierName?.Trim() ?? string.Empty,
             QuoteId = QuoteId,
             InvestmentNotes = string.IsNullOrWhiteSpace(InvestmentNotes) ? null : InvestmentNotes.Trim(),
             CurrencyCode = string.IsNullOrWhiteSpace(CurrencyCode) ? "USD" : CurrencyCode.Trim().ToUpperInvariant(),

@@ -1,4 +1,5 @@
 using IORManager.Data;
+using IORManager.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -27,10 +28,36 @@ public class CustomersController : ControllerBase
                 customer.Address,
                 customer.Contact,
                 customer.DefaultPaymentTermsDays,
+                customer.DefaultNcfCategory,
                 customer.UpdatedAt))
             .ToArray();
 
         return Ok(customers);
+    }
+
+    [HttpPut("{id:guid}/ncf-category")]
+    public ActionResult UpdateDefaultNcfCategory(Guid id, [FromBody] CustomerNcfCategoryRequest request)
+    {
+        if (!NcfCategoryCatalog.TryGetByCode(request.NcfCategory, out var definition))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid NCF category",
+                Detail = $"The NCF category \"{request.NcfCategory}\" is not supported.",
+            });
+        }
+
+        var customer = _context.Customers.FirstOrDefault(c => c.Id == id);
+        if (customer is null)
+        {
+            return NotFound();
+        }
+
+        customer.DefaultNcfCategory = definition.Code;
+        customer.UpdatedAt = DateTime.UtcNow;
+        _context.SaveChanges();
+
+        return NoContent();
     }
 
     [HttpPut("{id:guid}/payment-terms")]
@@ -65,6 +92,9 @@ public record CustomerListItemResponse(
     string Address,
     string Contact,
     int DefaultPaymentTermsDays,
+    string? DefaultNcfCategory,
     DateTime UpdatedAt);
 
 public record CustomerPaymentTermsRequest(int DefaultPaymentTermsDays);
+
+public record CustomerNcfCategoryRequest(string NcfCategory);

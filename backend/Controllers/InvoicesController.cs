@@ -298,12 +298,22 @@ public class InvoicesController : ControllerBase
 
         var responses = regimes.Select(regime =>
         {
-            // Last NCF used: latest NcfNumber in this category across ALL invoices
-            // (uses NcfCategory so pre-existing invoices without FiscalRegimeId are included)
+            // Last NCF used: highest NcfNumber in this category across ALL invoices
+            // (uses NcfCategory so pre-existing invoices without FiscalRegimeId are included).
+            // Sorted by the parsed numeric sequence, not the raw string — a string sort lets
+            // malformed/legacy values (e.g. a wrong prefix) outrank a legitimately higher NCF.
             var lastNcf = _context.Invoices
                 .Where(i => i.NcfCategory == regime.Code && i.NcfNumber != null)
-                .OrderByDescending(i => i.NcfNumber)
                 .Select(i => i.NcfNumber)
+                .AsEnumerable()
+                .Select(number => new
+                {
+                    Number = number,
+                    Parsed = NcfCategoryCatalog.TryParseSequenceValue(regime.Code, number, out var seq) ? seq : (long?)null,
+                })
+                .Where(x => x.Parsed.HasValue)
+                .OrderByDescending(x => x.Parsed)
+                .Select(x => x.Number)
                 .FirstOrDefault();
 
             // Next NCF: peek without advancing the sequence

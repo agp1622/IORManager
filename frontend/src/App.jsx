@@ -952,6 +952,7 @@ function App() {
           address: typeof customer?.address === 'string' ? customer.address.trim() : '',
           contact: typeof customer?.contact === 'string' ? customer.contact.trim() : '',
           defaultPaymentTermsDays: typeof customer?.defaultPaymentTermsDays === 'number' ? customer.defaultPaymentTermsDays : 30,
+          defaultNcfCategory: typeof customer?.defaultNcfCategory === 'string' ? customer.defaultNcfCategory : null,
         }
 
         if (!normalized.name) {
@@ -2120,12 +2121,6 @@ function App() {
     setStatus(null)
   }, [])
 
-  const handleLogExpense = useCallback((doc) => {
-    setEditingPO(null)
-    setPrefillPOQuoteId(doc.id)
-    setStatus(null)
-    setActiveSection('purchaseOrders')
-  }, [])
 
   const handleUpdatePO = useCallback(
     async (poId, payload) => {
@@ -2249,6 +2244,25 @@ function App() {
     setPaymentTermsDialog((current) => ({ ...current, isOpen: false }))
   }, [])
 
+  const handleUpdateCustomerNcfCategory = useCallback(async (customerId, category) => {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/Customers/${customerId}/ncf-category`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ncfCategory: category }),
+      })
+      if (!response.ok) {
+        throw new Error(translate('paymentTerms.ncfCategorySaveError'))
+      }
+      await loadCustomers()
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error.message || translate('paymentTerms.ncfCategorySaveError'),
+      })
+    }
+  }, [loadCustomers, translate])
+
   const handleSavePaymentTerms = useCallback(async () => {
     const days = parseInt(paymentTermsDialog.inputValue, 10)
     if (Number.isNaN(days) || days < 1 || days > 365) {
@@ -2338,8 +2352,10 @@ function App() {
 
   const convertOrderToInvoice = useCallback(
     async (orderId, ncfValue, ncfCategory, skipNcf = false) => {
-      const normalizedCategory =
-        normalizeNcfCategory(ncfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY
+      // Only send an explicit category when the caller actually chose one — leaving it
+      // null lets the backend fall back to the linked customer's default NCF category
+      // instead of forcing the global default.
+      const normalizedCategory = normalizeNcfCategory(ncfCategory, ncfCategories)
 
       const response = await apiFetch(`${API_BASE_URL}/PurchaseOrders/${orderId}/convert`, {
         method: 'POST',
@@ -2362,7 +2378,9 @@ function App() {
         invoiceNumber: body?.invoiceNumber || body?.number || '',
         ncfNumber: body?.ncfNumber || body?.ncf || body?.value || '',
         ncfCategory:
-          normalizeNcfCategory(body?.ncfCategory || body?.category, ncfCategories) || normalizedCategory,
+          normalizeNcfCategory(body?.ncfCategory || body?.category, ncfCategories) ||
+          normalizedCategory ||
+          DEFAULT_NCF_CATEGORY,
       }
     },
     [ncfCategories, translate],
@@ -2531,9 +2549,14 @@ function App() {
         ? (activeSection === 'invoices' ? doc.id : doc.convertedInvoiceId || null)
         : null
       const existingValue = doc?.ncfNumber || ''
+      const linkedQuote = doc?.quoteId ? documents.quotes.find((quote) => quote.id === doc.quoteId) : null
+      const linkedCustomer = linkedQuote?.customerId
+        ? customers.find((customer) => customer.id === linkedQuote.customerId)
+        : null
       const existingCategory =
         normalizeNcfCategory(doc?.ncfCategory, ncfCategories) ||
         inferNcfCategoryFromNumber(existingValue, ncfCategories) ||
+        normalizeNcfCategory(linkedCustomer?.defaultNcfCategory, ncfCategories) ||
         DEFAULT_NCF_CATEGORY
       const shouldFetchSuggestion = !editingNcf && !existingValue
 
@@ -2628,7 +2651,7 @@ function App() {
         })
       }
     },
-    [activeSection, extractNcfSuffix, fetchInvoiceNcfData, fetchSuggestedNcf, ncfCategories, translate],
+    [activeSection, customers, documents, extractNcfSuffix, fetchInvoiceNcfData, fetchSuggestedNcf, ncfCategories, translate],
   )
 
   const handleCancelNcfDialog = useCallback(() => {
@@ -2932,6 +2955,26 @@ function App() {
     },
     [editingPO, handleCreate, handleOpenExpensesDialog, handleUpdatePO],
   )
+
+  const handleCreateOrderFromQuote = useCallback(async (quote) => {
+    if (!quote?.id) return
+
+    const payload = {
+      purchaseOrderNumber: '',
+      purchaseOrderDate: new Date().toISOString().slice(0, 10),
+      supplierName: quote.customerName || quote.partyName || '',
+      currencyCode: quote.currencyCode || 'USD',
+      quoteId: quote.id,
+      investmentNotes: null,
+      lines: [],
+    }
+
+    const created = await handleCreate('purchaseOrders', payload)
+    if (created?.id) {
+      setActiveSection('purchaseOrders')
+      void handleOpenExpensesDialog(created)
+    }
+  }, [handleCreate, handleOpenExpensesDialog])
 
   const handleCloseExpensesDialog = useCallback(() => {
     setExpensesDialog({
@@ -3341,7 +3384,7 @@ function App() {
           label: translate('purchaseOrderForm.createOrderAction'),
           loadingLabel: translate('purchaseOrderForm.createOrderAction'),
           busyId: null,
-          onClick: handleLogExpense,
+          onClick: (doc) => void handleCreateOrderFromQuote(doc).catch(() => {}),
           variant: 'button--ghost',
         },
         ...(canDelete ? [{
@@ -3528,7 +3571,7 @@ function App() {
     handleEditPO,
     handleEditQuote,
     handleGenerateInvoice,
-    handleLogExpense,
+    handleCreateOrderFromQuote,
     handleMarkAPPaid,
     handleMarkInvoicePaid,
     handleMarkInvoiceUnpaid,
@@ -4329,6 +4372,7 @@ function App() {
                         <tr>
                           <th scope="col">{translate('paymentTerms.customerLabel')}</th>
                           <th scope="col" style={{ textAlign: 'right' }}>{translate('paymentTerms.daysLabel')}</th>
+                          <th scope="col">{translate('paymentTerms.ncfCategoryLabel')}</th>
                           <th scope="col" style={{ textAlign: 'right' }}>{translate('documentList.actions')}</th>
                         </tr>
                       </thead>
@@ -4338,6 +4382,17 @@ function App() {
                             <td>{customer.name}</td>
                             <td style={{ textAlign: 'right' }}>
                               <strong>{customer.defaultPaymentTermsDays ?? 30}</strong>
+                            </td>
+                            <td>
+                              <ThemedSelect
+                                value={normalizeNcfCategory(customer.defaultNcfCategory, ncfCategories) || DEFAULT_NCF_CATEGORY}
+                                onChange={(nextValue) => handleUpdateCustomerNcfCategory(customer.id, nextValue)}
+                                ariaLabel={translate('paymentTerms.ncfCategoryLabel')}
+                                options={ncfCategories.map((option) => ({
+                                  value: option.code,
+                                  label: `${option.code} - ${(option.name || '').trim() || translate(`ncfCategories.${option.code}`)}`,
+                                }))}
+                              />
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               <button

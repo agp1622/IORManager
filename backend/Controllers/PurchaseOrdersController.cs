@@ -60,8 +60,29 @@ public class PurchaseOrdersController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        var purchaseOrder = _repository.Add(request.ToPurchaseOrder());
-        return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, purchaseOrder);
+        var purchaseOrder = request.ToPurchaseOrder();
+
+        if (string.IsNullOrWhiteSpace(purchaseOrder.Number))
+        {
+            var candidate = DocumentNumberFormatter.ToOrderNumber(_numberGenerator.GenerateNextNumber());
+            while (_context.PurchaseOrders.Any(existing => existing.Number == candidate))
+            {
+                candidate = DocumentNumberFormatter.ToOrderNumber(_numberGenerator.GenerateNextNumber());
+            }
+
+            purchaseOrder.Number = candidate;
+        }
+
+        if (string.IsNullOrWhiteSpace(purchaseOrder.SupplierName))
+        {
+            var linkedQuote = purchaseOrder.QuoteId.HasValue
+                ? _context.Quotes.FirstOrDefault(quote => quote.Id == purchaseOrder.QuoteId.Value)
+                : null;
+            purchaseOrder.SupplierName = linkedQuote?.PartyName ?? "N/A";
+        }
+
+        var created = _repository.Add(purchaseOrder);
+        return CreatedAtAction(nameof(GetPurchaseOrder), new { id = created.Id }, created);
     }
 
     [HttpPut("{id:guid}")]
@@ -199,6 +220,7 @@ public class PurchaseOrdersController : ControllerBase
 
         var quote = _context.Quotes
             .Include(existing => existing.Lines)
+            .Include(existing => existing.Customer)
             .FirstOrDefault(existing => existing.Id == order.QuoteId.Value);
         if (quote is null)
         {
@@ -233,7 +255,7 @@ public class PurchaseOrdersController : ControllerBase
         string? categoryForGeneration = null;
         if (request?.SkipNcf != true)
         {
-            categoryForGeneration = normalizedCategory ?? NcfCategoryCatalog.DefaultCategoryCode;
+            categoryForGeneration = normalizedCategory ?? quote.Customer?.DefaultNcfCategory ?? NcfCategoryCatalog.DefaultCategoryCode;
             if (string.IsNullOrWhiteSpace(normalizedNcf))
             {
                 normalizedNcf = _ncfNumberGenerator.GenerateNextNumber(categoryForGeneration);
