@@ -509,7 +509,25 @@ const DocumentList = ({
                 </td>
                 {!isAccountsPayableList ? (
                   <td data-heading={t('documentList.ncfLabel')}>
-                    {ncfNumber || '—'}
+                    <div className="document-number">
+                      <span>{ncfNumber || '—'}</span>
+                      {isInvoiceList && document.ecfStatus ? (
+                        <span
+                          className={`pill ${
+                            document.ecfStatus === 'Aceptado'
+                              ? 'pill--success'
+                              : document.ecfStatus === 'Rechazado' || document.ecfStatus === 'Error'
+                                ? 'pill--error'
+                                : document.ecfStatus === 'AceptadoCondicional'
+                                  ? 'pill--warning'
+                                  : 'pill--info'
+                          }`}
+                          title={document.ecfResponseMessage || undefined}
+                        >
+                          {document.ecfStatus}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                 ) : null}
                 {isAccountsPayableList ? (
@@ -693,6 +711,8 @@ function App() {
   const [markingUnpaidId, setMarkingUnpaidId] = useState(null)
   const [markingSentId, setMarkingSentId] = useState(null)
   const [markingUnsentId, setMarkingUnsentId] = useState(null)
+  const [emittingEcfId, setEmittingEcfId] = useState(null)
+  const [refreshingEcfId, setRefreshingEcfId] = useState(null)
   const [markingPoStatusId, setMarkingPoStatusId] = useState(null)
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(() => new Set())
   const [isDownloadingSelectedPdf, setIsDownloadingSelectedPdf] = useState(false)
@@ -1799,6 +1819,78 @@ function App() {
         })
       } finally {
         setMarkingUnsentId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handleEmitEcf = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setEmittingEcfId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/ecf/emit`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.ecfEmitError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.ecfEmitError'),
+        })
+      } finally {
+        setEmittingEcfId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handleRefreshEcfStatus = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setRefreshingEcfId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/ecf/status/refresh`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.ecfRefreshError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.ecfRefreshError'),
+        })
+      } finally {
+        setRefreshingEcfId(null)
       }
     },
     [activeSection, loadSection, translate],
@@ -3017,6 +3109,24 @@ function App() {
           variant: 'button--ghost',
         },
         {
+          label: translate('documentList.ecfEmit'),
+          loadingLabel: translate('documentList.ecfEmitting'),
+          busyId: emittingEcfId,
+          isVisible: (doc) =>
+            Boolean(doc?.ncfCategory?.toUpperCase().startsWith('E')) &&
+            !['Aceptado', 'AceptadoCondicional'].includes(doc?.ecfStatus),
+          onClick: handleEmitEcf,
+          variant: 'button--ghost',
+        },
+        {
+          label: translate('documentList.ecfRefreshStatus'),
+          loadingLabel: translate('documentList.ecfRefreshing'),
+          busyId: refreshingEcfId,
+          isVisible: (doc) => Boolean(doc?.ecfStatus),
+          onClick: handleRefreshEcfStatus,
+          variant: 'button--ghost',
+        },
+        {
           label: translate('documentList.markPaid'),
           loadingLabel: translate('documentList.markingPaid'),
           busyId: markingPaidId,
@@ -3127,6 +3237,7 @@ function App() {
     handleEditAP,
     handleEditPO,
     handleEditQuote,
+    handleEmitEcf,
     handleGenerateInvoice,
     handleLogExpense,
     handleMarkAPPaid,
@@ -3134,6 +3245,7 @@ function App() {
     handleMarkInvoiceUnpaid,
     handleMarkInvoiceSent,
     handleMarkInvoiceUnsent,
+    handleRefreshEcfStatus,
     handleUpdatePurchaseOrderStatus,
     handleOpenAttachmentsDialog,
     handleOpenNcfDialog,
@@ -3146,6 +3258,8 @@ function App() {
     isInvoicesSection,
     isPurchaseOrdersSection,
     isQuotesSection,
+    emittingEcfId,
+    refreshingEcfId,
     markingPaidId,
     markingUnpaidId,
     markingSentId,

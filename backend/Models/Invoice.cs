@@ -67,6 +67,19 @@ public class Invoice : FinancialDocument
     [NotMapped]
     public int? CustomerPaymentTermsDays { get; set; }
 
+    /// <summary>Populated by the controller from this invoice's <see cref="EcfSubmission"/>, if any; not persisted.</summary>
+    [NotMapped]
+    public string? EcfStatus { get; set; }
+
+    [NotMapped]
+    public string? EcfTrackId { get; set; }
+
+    [NotMapped]
+    public string? EcfSecurityCode { get; set; }
+
+    [NotMapped]
+    public string? EcfResponseMessage { get; set; }
+
     /// <summary>The date payment is due: when the invoice was sent, plus the customer's payment terms.</summary>
     [NotMapped]
     public DateTime? PaymentDueDate => SentAt?.AddDays(CustomerPaymentTermsDays ?? 30);

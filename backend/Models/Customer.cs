@@ -20,6 +20,13 @@ public class Customer
     public string Contact { get; set; } = string.Empty;
 
     /// <summary>
+    /// RNC (Registro Nacional del Contribuyente) or Cédula of this customer. Required to issue an
+    /// e-CF to them once the total exceeds the DGII's threshold for identifying the buyer.
+    /// </summary>
+    [MaxLength(11)]
+    public string? Rnc { get; set; }
+
+    /// <summary>
     /// Default number of days from invoice date until payment is due.
     /// Used when automatically creating an AccountPayable upon NCF assignment.
     /// </summary>

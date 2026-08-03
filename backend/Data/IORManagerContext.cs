@@ -27,6 +27,8 @@ public class IORManagerContext : DbContext
     public DbSet<QuoteAttachment> QuoteAttachments => Set<QuoteAttachment>();
     public DbSet<AccountPayable> AccountsPayable => Set<AccountPayable>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<EcfRange> EcfRanges => Set<EcfRange>();
+    public DbSet<EcfSubmission> EcfSubmissions => Set<EcfSubmission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -46,6 +48,8 @@ public class IORManagerContext : DbContext
         ConfigurePurchaseOrderQuoteLink(modelBuilder);
         ConfigureAccountPayable(modelBuilder);
         ConfigureUsers(modelBuilder);
+        ConfigureEcfRange(modelBuilder);
+        ConfigureEcfSubmission(modelBuilder);
     }
 
     private static void ConfigureUsers(ModelBuilder modelBuilder)
@@ -332,6 +336,48 @@ public class IORManagerContext : DbContext
             builder.HasIndex(ap => ap.InvoiceId)
                 .IsUnique()
                 .HasFilter("[InvoiceId] IS NOT NULL");
+        });
+    }
+
+    private static void ConfigureEcfRange(ModelBuilder modelBuilder)
+    {
+        var dateConverter = new ValueConverter<DateOnly?, DateTime?>(
+            dateOnly => dateOnly.HasValue ? dateOnly.Value.ToDateTime(TimeOnly.MinValue) : null,
+            dateTime => dateTime.HasValue
+                ? DateOnly.FromDateTime(DateTime.SpecifyKind(dateTime.Value, DateTimeKind.Utc))
+                : null);
+
+        var dateComparer = new ValueComparer<DateOnly?>(
+            (left, right) => left == right,
+            dateOnly => dateOnly.HasValue ? dateOnly.Value.GetHashCode() : 0,
+            dateOnly => dateOnly);
+
+        modelBuilder.Entity<EcfRange>(builder =>
+        {
+            builder.HasIndex(range => range.DocumentTypeCode).IsUnique();
+
+            builder.Property(range => range.AuthorizedAt)
+                .HasConversion(dateConverter)
+                .Metadata.SetValueComparer(dateComparer);
+
+            builder.Property(range => range.ExpiresAt)
+                .HasConversion(dateConverter)
+                .Metadata.SetValueComparer(dateComparer);
+        });
+    }
+
+    private static void ConfigureEcfSubmission(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<EcfSubmission>(builder =>
+        {
+            builder.HasIndex(submission => submission.InvoiceId).IsUnique();
+            builder.HasIndex(submission => submission.ENcf).IsUnique();
+
+            builder.HasOne(submission => submission.Invoice)
+                .WithMany()
+                .HasForeignKey(submission => submission.InvoiceId)
+                // Prevent multiple cascade paths through the FinancialDocument TPH table.
+                .OnDelete(DeleteBehavior.NoAction);
         });
     }
 }

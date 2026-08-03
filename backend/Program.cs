@@ -2,6 +2,7 @@ using IORManager.Data;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
+using IORManager.Services.Dgii;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -82,6 +83,15 @@ public class Program
         builder.Services.AddSingleton<IFinancialDocumentPdfService, QuestPdfFinancialDocumentPdfService>();
         builder.Services.AddScoped<IInvoiceNumberGenerator, InvoiceNumberGenerator>();
         builder.Services.AddScoped<INcfNumberGenerator, NcfNumberGenerator>();
+
+        // DGII e-CF (electronic invoicing) integration.
+        builder.Services.Configure<DgiiOptions>(builder.Configuration.GetSection(DgiiOptions.SectionName));
+        builder.Services.AddScoped<IEcfNumberGenerator, EcfNumberGenerator>();
+        builder.Services.AddSingleton<IEcfXmlBuilder, EcfXmlBuilder>();
+        builder.Services.AddSingleton<IEcfSigner, XmlDsigEcfSigner>();
+        builder.Services.AddSingleton<IEcfCertificateProvider, DgiiCertificateProvider>();
+        builder.Services.AddScoped<IEcfService, EcfService>();
+        builder.Services.AddHttpClient<IDgiiEcfClient, DgiiEcfClient>();
 
         builder.Services.AddDbContext<IORManagerContext>(options =>
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));

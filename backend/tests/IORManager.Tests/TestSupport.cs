@@ -3,6 +3,7 @@ using IORManager.Data;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
+using IORManager.Services.Dgii;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -80,6 +81,8 @@ internal static class TestSupport
             new StubFinancialDocumentPdfService(),
             new StubInvoiceNumberGenerator(),
             new NcfNumberGenerator(context),
+            new EcfNumberGenerator(context),
+            new StubEcfService(),
             context);
     }
 
@@ -102,6 +105,15 @@ internal static class TestSupport
         private int _next = 1;
 
         public string GenerateNextNumber() => $"QUO-{_next++:000000}";
+    }
+
+    private sealed class StubEcfService : IEcfService
+    {
+        public Task<EcfSubmission> EmitAsync(Guid invoiceId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
+        public Task<EcfSubmission> RefreshStatusAsync(Guid invoiceId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 
     private sealed class StubFinancialDocumentPdfService : IFinancialDocumentPdfService

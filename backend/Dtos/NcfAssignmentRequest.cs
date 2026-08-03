@@ -24,4 +24,4 @@ public record FiscalRegimeResponse(
     string Name,
     int InvoiceCount,
     string? LastNcfUsed,
-    string NextNcf);
+    string? NextNcf);

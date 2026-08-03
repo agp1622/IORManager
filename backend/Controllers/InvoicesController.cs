@@ -5,6 +5,7 @@ using IORManager.Dtos;
 using IORManager.Models;
 using IORManager.Repositories;
 using IORManager.Services;
+using IORManager.Services.Dgii;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +20,8 @@ public class InvoicesController : ControllerBase
     private readonly IFinancialDocumentPdfService _pdfService;
     private readonly IInvoiceNumberGenerator _numberGenerator;
     private readonly INcfNumberGenerator _ncfNumberGenerator;
+    private readonly IEcfNumberGenerator _ecfNumberGenerator;
+    private readonly IEcfService _ecfService;
     private readonly IORManagerContext _context;
 
     public InvoicesController(
@@ -26,12 +29,16 @@ public class InvoicesController : ControllerBase
         IFinancialDocumentPdfService pdfService,
         IInvoiceNumberGenerator numberGenerator,
         INcfNumberGenerator ncfNumberGenerator,
+        IEcfNumberGenerator ecfNumberGenerator,
+        IEcfService ecfService,
         IORManagerContext context)
     {
         _repository = repository;
         _pdfService = pdfService;
         _numberGenerator = numberGenerator;
         _ncfNumberGenerator = ncfNumberGenerator;
+        _ecfNumberGenerator = ecfNumberGenerator;
+        _ecfService = ecfService;
         _context = context;
     }
 
@@ -41,6 +48,7 @@ public class InvoicesController : ControllerBase
         var invoices = _repository.GetAll().ToList();
         PopulateQuoteNumbers(invoices);
         PopulateCustomerPaymentTerms(invoices);
+        PopulateEcfStatus(invoices);
         return Ok(invoices);
     }
 
@@ -55,6 +63,7 @@ public class InvoicesController : ControllerBase
 
         PopulateQuoteNumbers([invoice]);
         PopulateCustomerPaymentTerms([invoice]);
+        PopulateEcfStatus([invoice]);
         return Ok(invoice);
     }
 
@@ -307,7 +316,7 @@ public class InvoicesController : ControllerBase
                 .FirstOrDefault();
 
             // Next NCF: peek without advancing the sequence
-            var nextNcf = _ncfNumberGenerator.PeekNextNumber(regime.Code);
+            var nextNcf = PeekNcf(regime.Code);
 
             return new FiscalRegimeResponse(
                 regime.Id,
@@ -330,7 +339,16 @@ public class InvoicesController : ControllerBase
         }
 
         normalizedCategory ??= NcfCategoryCatalog.DefaultCategoryCode;
-        var nextNumber = _ncfNumberGenerator.PeekNextNumber(normalizedCategory);
+        var nextNumber = PeekNcf(normalizedCategory);
+        if (nextNumber is null)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "No RFCE range configured",
+                Detail = $"No DGII-authorized numbering range is configured for \"{normalizedCategory}\" yet.",
+            });
+        }
+
         return Ok(new NcfAssignmentResponse(nextNumber, normalizedCategory));
     }
 
@@ -366,6 +384,127 @@ public class InvoicesController : ControllerBase
 
         return NoContent();
     }
+
+    /// <summary>Lists the DGII-authorized RFCE numbering ranges configured for each electronic NCF category.</summary>
+    [HttpGet("ecf-ranges")]
+    public ActionResult<IReadOnlyCollection<EcfRangeResponse>> GetEcfRanges()
+    {
+        var ranges = _context.EcfRanges.ToDictionary(range => range.DocumentTypeCode);
+
+        var responses = NcfCategoryCatalog.GetAll()
+            .Where(definition => definition.IsElectronic)
+            .Select(definition =>
+            {
+                var documentTypeCode = definition.Code[1..];
+                ranges.TryGetValue(documentTypeCode, out var range);
+                return new EcfRangeResponse(
+                    definition.Code,
+                    documentTypeCode,
+                    range?.RangeStart,
+                    range?.RangeEnd,
+                    range?.NextNumber,
+                    range?.AuthorizedAt,
+                    range?.ExpiresAt,
+                    PeekNcf(definition.Code));
+            })
+            .ToList();
+
+        return Ok(responses);
+    }
+
+    /// <summary>Records a DGII-authorized RFCE numbering range for one electronic NCF category (e.g. "E31").</summary>
+    [HttpPut("ecf-ranges/{categoryCode}")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult SetEcfRange(string categoryCode, [FromBody] EcfRangeSetRequest request)
+    {
+        if (!NcfCategoryCatalog.TryGetByCode(categoryCode, out var definition) || !definition.IsElectronic)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid e-CF category",
+                Detail = $"\"{categoryCode}\" is not an electronic NCF category.",
+            });
+        }
+
+        try
+        {
+            _ecfNumberGenerator.SetRange(categoryCode, request.RangeStart, request.RangeEnd, request.AuthorizedAt, request.ExpiresAt);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new ProblemDetails { Title = "Invalid request", Detail = ex.Message });
+        }
+
+        return NoContent();
+    }
+
+    /// <summary>Builds, signs, and submits the e-CF for this invoice to the DGII.</summary>
+    [HttpPost("{id:guid}/ecf/emit")]
+    public async Task<ActionResult<EcfSubmissionResponse>> EmitEcf(Guid id)
+    {
+        try
+        {
+            var submission = await _ecfService.EmitAsync(id);
+            return Ok(ToEcfSubmissionResponse(submission));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ProblemDetails { Title = "No se pudo emitir el e-CF", Detail = ex.Message });
+        }
+    }
+
+    /// <summary>Re-queries the DGII for the current validation status of this invoice's e-CF.</summary>
+    [HttpPost("{id:guid}/ecf/status/refresh")]
+    public async Task<ActionResult<EcfSubmissionResponse>> RefreshEcfStatus(Guid id)
+    {
+        try
+        {
+            var submission = await _ecfService.RefreshStatusAsync(id);
+            return Ok(ToEcfSubmissionResponse(submission));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ProblemDetails { Title = "No se pudo consultar el estado", Detail = ex.Message });
+        }
+    }
+
+    /// <summary>Returns the last known e-CF status for this invoice without contacting the DGII.</summary>
+    [HttpGet("{id:guid}/ecf/status")]
+    public ActionResult<EcfSubmissionResponse> GetEcfStatus(Guid id)
+    {
+        var submission = _context.EcfSubmissions.FirstOrDefault(existing => existing.InvoiceId == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(ToEcfSubmissionResponse(submission));
+    }
+
+    /// <summary>Downloads the signed e-CF XML for this invoice.</summary>
+    [HttpGet("{id:guid}/ecf/xml")]
+    public ActionResult GetEcfXml(Guid id)
+    {
+        var submission = _context.EcfSubmissions.FirstOrDefault(existing => existing.InvoiceId == id);
+        if (submission?.SignedXml is null)
+        {
+            return NotFound();
+        }
+
+        return File(System.Text.Encoding.UTF8.GetBytes(submission.SignedXml), "application/xml", $"{submission.ENcf}.xml");
+    }
+
+    private static EcfSubmissionResponse ToEcfSubmissionResponse(EcfSubmission submission) => new(
+        submission.InvoiceId,
+        submission.ENcf,
+        submission.DocumentTypeCode,
+        submission.Status,
+        submission.TrackId,
+        submission.SecurityCode,
+        submission.ResponseMessage,
+        submission.SignedAt,
+        submission.SubmittedAt,
+        submission.RespondedAt);
 
     [HttpPost]
     public ActionResult<InvoiceCreateResponse> CreateInvoice([FromBody] InvoiceCreateRequest request)
@@ -549,6 +688,18 @@ public class InvoicesController : ControllerBase
             .Include(existing => existing.Lines)
             .FirstOrDefault(existing => existing.Id == id);
 
+    /// <summary>Routes NCF generation to the e-CF (DGII RFCE range) generator for electronic categories.</summary>
+    private string GenerateNcf(string categoryCode) =>
+        NcfCategoryCatalog.TryGetByCode(categoryCode, out var definition) && definition.IsElectronic
+            ? _ecfNumberGenerator.GenerateNextNumber(categoryCode)
+            : _ncfNumberGenerator.GenerateNextNumber(categoryCode);
+
+    /// <summary>Same routing as <see cref="GenerateNcf"/> but without advancing the sequence.</summary>
+    private string? PeekNcf(string categoryCode) =>
+        NcfCategoryCatalog.TryGetByCode(categoryCode, out var definition) && definition.IsElectronic
+            ? _ecfNumberGenerator.PeekNextNumber(categoryCode)
+            : _ncfNumberGenerator.PeekNextNumber(categoryCode);
+
     private void PopulateQuoteNumbers(IEnumerable<Invoice> invoices)
     {
         var invoiceList = invoices.ToList();
@@ -614,6 +765,35 @@ public class InvoicesController : ControllerBase
             {
                 invoice.CustomerPaymentTermsDays = days;
             }
+        }
+    }
+
+    /// <summary>Populates each invoice's e-CF status fields from its <see cref="EcfSubmission"/>, if any.</summary>
+    private void PopulateEcfStatus(IEnumerable<Invoice> invoices)
+    {
+        var invoiceList = invoices.ToList();
+        var invoiceIds = invoiceList.Select(invoice => invoice.Id).ToList();
+        if (invoiceIds.Count == 0)
+        {
+            return;
+        }
+
+        var submissions = _context.EcfSubmissions
+            .AsNoTracking()
+            .Where(submission => invoiceIds.Contains(submission.InvoiceId))
+            .ToDictionary(submission => submission.InvoiceId);
+
+        foreach (var invoice in invoiceList)
+        {
+            if (!submissions.TryGetValue(invoice.Id, out var submission))
+            {
+                continue;
+            }
+
+            invoice.EcfStatus = submission.Status;
+            invoice.EcfTrackId = submission.TrackId;
+            invoice.EcfSecurityCode = submission.SecurityCode;
+            invoice.EcfResponseMessage = submission.ResponseMessage;
         }
     }
 
@@ -708,7 +888,7 @@ public class InvoicesController : ControllerBase
                 ?? NcfCategoryCatalog.DefaultCategoryCode;
 
             invoice.NcfCategory = categoryForGeneration;
-            invoice.NcfNumber = _ncfNumberGenerator.GenerateNextNumber(categoryForGeneration);
+            invoice.NcfNumber = GenerateNcf(categoryForGeneration);
             normalizedNcf = invoice.NcfNumber;
         }
         else

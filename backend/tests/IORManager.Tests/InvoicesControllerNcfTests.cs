@@ -11,12 +11,40 @@ public class InvoicesControllerNcfTests
         using var scope = new TestScope();
         var controller = TestSupport.CreateInvoicesController(scope.Context);
 
+        var action = controller.GetNextNcf("B11");
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var payload = Assert.IsType<NcfAssignmentResponse>(ok.Value);
+        Assert.Equal("B11", payload.NcfCategory);
+        Assert.StartsWith("B11", payload.NcfNumber);
+    }
+
+    [Fact]
+    public void GetNextNcf_ReturnsBadRequest_ForElectronicCategoryWithoutRfceRange()
+    {
+        using var scope = new TestScope();
+        var controller = TestSupport.CreateInvoicesController(scope.Context);
+
+        var action = controller.GetNextNcf("E31");
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        var problem = Assert.IsType<ProblemDetails>(badRequest.Value);
+        Assert.Equal("No RFCE range configured", problem.Title);
+    }
+
+    [Fact]
+    public void GetNextNcf_ReturnsElectronicNcf_OnceRfceRangeIsConfigured()
+    {
+        using var scope = new TestScope();
+        var controller = TestSupport.CreateInvoicesController(scope.Context);
+        controller.SetEcfRange("E31", new EcfRangeSetRequest(1, 100, null, null));
+
         var action = controller.GetNextNcf("E31");
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var payload = Assert.IsType<NcfAssignmentResponse>(ok.Value);
         Assert.Equal("E31", payload.NcfCategory);
-        Assert.StartsWith("E31", payload.NcfNumber);
+        Assert.Equal("E310000000001", payload.NcfNumber);
     }
 
     [Fact]
