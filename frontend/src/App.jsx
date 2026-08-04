@@ -355,6 +355,9 @@ const DocumentList = ({
                 {renderSortButton(t('documentList.quoteNumber'), 'quoteNumber')}
               </th>
             ) : null}
+            {isInvoiceList ? (
+              <th scope="col">{t('documentList.customerPONumber')}</th>
+            ) : null}
             {isAccountsPayableList ? (
               <th scope="col" aria-sort={getAriaSort('invoiceNumber')}>
                 {renderSortButton(t('documentList.invoiceNumber'), 'invoiceNumber')}
@@ -474,6 +477,11 @@ const DocumentList = ({
                 {isInvoiceList ? (
                   <td data-heading={t('documentList.quoteNumber')}>
                     {quoteNumber}
+                  </td>
+                ) : null}
+                {isInvoiceList ? (
+                  <td data-heading={t('documentList.customerPONumber')}>
+                    {document.customerPONumber || '—'}
                   </td>
                 ) : null}
                 {isAccountsPayableList ? (
@@ -721,6 +729,7 @@ function App() {
   const [customers, setCustomers] = useState([])
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
   const [editingQuote, setEditingQuote] = useState(null)
+  const [editingInvoice, setEditingInvoice] = useState(null)
   const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false)
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false)
   const [editingPO, setEditingPO] = useState(null)
@@ -1429,6 +1438,7 @@ function App() {
   const isInsightsSection = activeSection === 'insights'
   const isAlertsSection = activeSection === 'alerts'
   const isEditingQuote = isQuotesSection && Boolean(editingQuote)
+  const isEditingInvoice = isInvoicesSection && Boolean(editingInvoice)
   const brandNote =
     BRAND_NOTES[activeSection] ??
     BRAND_NOTES.default ??
@@ -2090,23 +2100,87 @@ function App() {
   // ── Standalone invoice creation (no quote required) ────────────────────────
 
   const handleOpenInvoiceModal = useCallback(() => {
+    setEditingInvoice(null)
     setStatus(null)
     setIsInvoiceModalOpen(true)
   }, [])
 
   const handleCloseInvoiceModal = useCallback(() => {
+    setEditingInvoice(null)
     setIsInvoiceModalOpen(false)
   }, [])
 
+  const handleEditInvoice = useCallback((doc) => {
+    setEditingInvoice(doc)
+    setStatus(null)
+    setIsInvoiceModalOpen(true)
+  }, [])
+
+  const handleUpdateInvoice = useCallback(
+    async (invoiceId, payload) => {
+      const config = sectionConfig.invoices
+      if (!config) {
+        return false
+      }
+
+      setIsSubmitting(true)
+      setStatus(null)
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/${config.endpoint}/${invoiceId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        })
+
+        if (!response.ok) {
+          let detail = translate('sections.invoices.updateError')
+          try {
+            const responseBody = await response.json()
+            detail = responseBody?.title || responseBody?.detail || detail
+          } catch {
+            // Ignore parse errors and fall back to default error.
+          }
+          throw new Error(detail)
+        }
+
+        setStatus({ type: 'success', message: translate('sections.invoices.updateSuccess') })
+        await loadSection('invoices')
+        await loadCustomers()
+        return true
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('sections.invoices.updateError'),
+        })
+        return false
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [loadCustomers, loadSection, sectionConfig, translate],
+  )
+
   const handleInvoiceSubmit = useCallback(
     async (payload) => {
+      if (editingInvoice) {
+        const wasSuccessful = await handleUpdateInvoice(editingInvoice.id, payload)
+        if (wasSuccessful) {
+          setEditingInvoice(null)
+          setIsInvoiceModalOpen(false)
+        }
+        return wasSuccessful
+      }
+
       const created = await handleCreate('invoices', payload)
       if (created) {
         setIsInvoiceModalOpen(false)
       }
       return created
     },
-    [handleCreate],
+    [editingInvoice, handleCreate, handleUpdateInvoice],
   )
 
   const handleEditPO = useCallback((doc) => {
@@ -3401,6 +3475,13 @@ function App() {
       return [
         previewAction,
         {
+          label: translate('documentList.edit'),
+          loadingLabel: translate('documentList.editing'),
+          busyId: editingInvoice?.id ?? null,
+          onClick: handleEditInvoice,
+          variant: 'button--ghost',
+        },
+        {
           label: translate('documentList.editNcf'),
           loadingLabel: translate('documentList.editingNcf'),
           busyId: updatingNcfId,
@@ -3565,9 +3646,11 @@ function App() {
     duplicatingQuoteId,
     editingAP?.id,
     editingQuote?.id,
+    editingInvoice?.id,
     handleDeleteDocument,
     handleDuplicateQuote,
     handleEditAP,
+    handleEditInvoice,
     handleEditPO,
     handleEditQuote,
     handleGenerateInvoice,
@@ -4455,8 +4538,12 @@ function App() {
         <Modal
           isOpen={isInvoiceModalOpen}
           onClose={handleCloseInvoiceModal}
-          title={translate('sections.invoices.createHeading')}
-          description={translate('sections.invoices.createDescription')}
+          title={translate(
+            isEditingInvoice ? 'sections.invoices.editHeading' : 'sections.invoices.createHeading',
+          )}
+          description={translate(
+            isEditingInvoice ? 'sections.invoices.editDescription' : 'sections.invoices.createDescription',
+          )}
           eyebrow={config.title}
         >
           <InvoiceForm
@@ -4465,7 +4552,9 @@ function App() {
             t={translate}
             defaultCurrency={defaultCurrency}
             locale={locale}
-            mode="create"
+            initialInvoice={editingInvoice}
+            mode={isEditingInvoice ? 'edit' : 'create'}
+            onCancelEdit={isEditingInvoice ? handleCloseInvoiceModal : undefined}
             customers={customers}
           />
         </Modal>

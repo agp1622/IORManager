@@ -536,6 +536,7 @@ public class QuotesController : ControllerBase
             CustomerAddress = quote.CustomerAddress,
             CustomerContact = quote.CustomerContact,
             ItbisRate = quote.ItbisRate,
+            CustomerPONumber = quote.CustomerPONumber,
             Lines = quote.Lines.Select(line => new DocumentLine
             {
                 Description = line.Description,

@@ -78,6 +78,8 @@ public record InvoiceCreateRequest
             CultureName = Locale,
             Lines = Lines.Select(line => line.ToDocumentLine()).ToList(),
             ItbisRate = ItbisRate,
+            CustomerPONumber = string.IsNullOrWhiteSpace(CustomerPONumber) ? null : CustomerPONumber.Trim(),
+            Comments = string.IsNullOrWhiteSpace(Comments) ? null : Comments.Trim(),
             NcfNumber = null,
             NcfCategory = null
         };

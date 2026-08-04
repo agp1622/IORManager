@@ -55,7 +55,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         GenerateInvoiceDocument(invoice, isQuote: true, ncfNumber: null, comments: comments);
 
     public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) =>
-        GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber);
+        GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber, comments: invoice.Comments);
 
     public byte[] GenerateInvoicesBatchPdf(IReadOnlyCollection<Invoice> invoices)
     {
@@ -90,6 +90,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
         var addressLabel = Localize(culture, "Address", "Dirección");
         var contactLabel = Localize(culture, "Contact", "Contacto");
+        var customerPONumberLabel = Localize(culture, "Customer PO", "OC del cliente");
 
         var metadata = new List<(string Label, string Value)>
         {
@@ -105,6 +106,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         if (!string.IsNullOrWhiteSpace(invoice.CustomerContact))
         {
             metadata.Add((contactLabel, invoice.CustomerContact));
+        }
+        if (!string.IsNullOrWhiteSpace(invoice.CustomerPONumber))
+        {
+            metadata.Add((customerPONumberLabel, invoice.CustomerPONumber));
         }
 
         var totals = new List<(string Label, string Value)>
@@ -243,6 +248,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         var itbisAmountLabel = Localize(culture, "ITBIS Amount", "Monto ITBIS");
         var addressLabel = Localize(culture, "Address", "Dirección");
         var contactLabel = Localize(culture, "Contact", "Contacto");
+        var customerPONumberLabel = Localize(culture, "Customer PO", "OC del cliente");
 
         var metadata = new List<(string Label, string Value)>
         {
@@ -258,6 +264,10 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         if (!string.IsNullOrWhiteSpace(invoice.CustomerContact))
         {
             metadata.Add((contactLabel, invoice.CustomerContact));
+        }
+        if (!string.IsNullOrWhiteSpace(invoice.CustomerPONumber))
+        {
+            metadata.Add((customerPONumberLabel, invoice.CustomerPONumber));
         }
 
         var totals = new List<(string Label, string Value)>
@@ -286,7 +296,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             footerNotes: GetFooterNotes(culture),
             culture: culture,
             ncfNumber: invoiceNcf,
-            comments: isQuote ? comments : null);
+            comments: comments);
     }
 
     public byte[] GenerateReceiptPdf(Receipt receipt)

@@ -311,6 +311,8 @@ public class PurchaseOrdersController : ControllerBase
             QuoteId = quote.Id,
             OrderId = order.Id,
             ItbisRate = quote.ItbisRate,
+            CustomerPONumber = quote.CustomerPONumber,
+            Comments = quote.Comments,
             NcfNumber = normalizedNcf,
             NcfCategory = normalizedCategory ?? categoryForGeneration ?? null,
             InvoiceGeneratedAt = generatedAt,

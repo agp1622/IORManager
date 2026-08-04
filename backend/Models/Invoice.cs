@@ -31,6 +31,14 @@ public class Invoice : FinancialDocument
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
 
+    /// <summary>The customer's purchase order number / reference that authorized this invoice.</summary>
+    [MaxLength(100)]
+    public string? CustomerPONumber { get; set; }
+
+    /// <summary>Free-form internal or client-facing comments for this invoice.</summary>
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+
     public Guid? QuoteId { get; set; }
 
     [NotMapped]

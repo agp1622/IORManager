@@ -437,6 +437,8 @@ public class InvoicesController : ControllerBase
             CurrencyCode = source.CurrencyCode,
             CultureName = source.CultureName,
             ItbisRate = source.ItbisRate,
+            CustomerPONumber = source.CustomerPONumber,
+            Comments = source.Comments,
             NcfNumber = null,
             NcfCategory = null,
             InvoiceGeneratedAt = null,
@@ -521,6 +523,8 @@ public class InvoicesController : ControllerBase
         invoice.CurrencyCode = request.CurrencyCode;
         invoice.CultureName = request.Locale;
         invoice.ItbisRate = request.ItbisRate;
+        invoice.CustomerPONumber = string.IsNullOrWhiteSpace(request.CustomerPONumber) ? null : request.CustomerPONumber.Trim();
+        invoice.Comments = string.IsNullOrWhiteSpace(request.Comments) ? null : request.Comments.Trim();
         if (!TryResolveCustomerRecord(
                 invoice.CustomerName,
                 invoice.CustomerAddress,
