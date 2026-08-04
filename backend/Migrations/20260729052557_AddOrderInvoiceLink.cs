@@ -51,7 +51,7 @@ namespace IORManager.Migrations
                     inv.[CurrencyCode],
                     inv.[CultureName],
                     inv.[PartyName],
-                    0,
+                    inv.[TotalAmount],
                     NULL,
                     'PurchaseOrder',
                     inv.[QuoteId],
@@ -65,6 +65,12 @@ namespace IORManager.Migrations
                 SET inv.[OrderId] = m.[OrderId]
                 FROM [FinancialDocument] AS inv
                 INNER JOIN @Map AS m ON m.[InvoiceId] = inv.[Id];
+
+                -- Clone the invoice's lines onto the backfilled order so it isn't left with no items.
+                INSERT INTO [DocumentLines] ([Description], [Quantity], [UnitPrice], [UnitOfMeasure], [PurchaseOrderId])
+                SELECT dl.[Description], dl.[Quantity], dl.[UnitPrice], dl.[UnitOfMeasure], m.[OrderId]
+                FROM [DocumentLines] AS dl
+                INNER JOIN @Map AS m ON m.[InvoiceId] = dl.[InvoiceId];
                 """);
 
             migrationBuilder.CreateIndex(
