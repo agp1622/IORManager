@@ -504,6 +504,7 @@ public class PurchaseOrdersController : ControllerBase
         }
 
         var order = _context.PurchaseOrders
+            .Include(po => po.Lines)
             .Include(po => po.Expenses)
             .FirstOrDefault(po => po.Id == id);
         if (order is null)
@@ -554,6 +555,7 @@ public class PurchaseOrdersController : ControllerBase
         }
 
         var order = _context.PurchaseOrders
+            .Include(po => po.Lines)
             .Include(po => po.Expenses)
             .FirstOrDefault(po => po.Id == id);
         if (order is null)
@@ -598,6 +600,7 @@ public class PurchaseOrdersController : ControllerBase
     public ActionResult DeleteExpense(Guid id, int expenseId)
     {
         var order = _context.PurchaseOrders
+            .Include(po => po.Lines)
             .Include(po => po.Expenses)
             .FirstOrDefault(po => po.Id == id);
         if (order is null)
