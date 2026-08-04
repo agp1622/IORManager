@@ -1532,6 +1532,31 @@ textarea:focus {
   min-width: 16rem;
 }
 
+.line-table--expenses th:nth-child(2),
+.line-table--expenses td:nth-child(2) {
+  min-width: 10rem;
+}
+
+.line-table--expenses th:nth-child(3),
+.line-table--expenses td:nth-child(3) {
+  min-width: 9rem;
+}
+
+.line-table--expenses th:nth-child(4),
+.line-table--expenses td:nth-child(4) {
+  min-width: 7rem;
+}
+
+.line-table--expenses th:nth-child(6),
+.line-table--expenses td:nth-child(6) {
+  min-width: 9rem;
+}
+
+.line-table--expenses th:nth-child(7),
+.line-table--expenses td:nth-child(7) {
+  min-width: 11rem;
+}
+
 @media (max-width: 480px) {
   .modal-overlay {
     padding: 0;

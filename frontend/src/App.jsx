@@ -4614,7 +4614,7 @@ function App() {
               <p className="muted">{translate('expensesDialog.empty')}</p>
             ) : (
               <div className="line-table-wrapper">
-                <table className="line-table">
+                <table className="line-table line-table--expenses">
                   <thead>
                     <tr>
                       <th scope="col">{translate('expensesDialog.descriptionLabel')}</th>

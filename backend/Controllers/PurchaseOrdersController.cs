@@ -73,12 +73,34 @@ public class PurchaseOrdersController : ControllerBase
             purchaseOrder.Number = candidate;
         }
 
-        if (string.IsNullOrWhiteSpace(purchaseOrder.SupplierName))
+        if (purchaseOrder.QuoteId.HasValue)
         {
-            var linkedQuote = purchaseOrder.QuoteId.HasValue
-                ? _context.Quotes.FirstOrDefault(quote => quote.Id == purchaseOrder.QuoteId.Value)
-                : null;
-            purchaseOrder.SupplierName = linkedQuote?.PartyName ?? "N/A";
+            var linkedQuote = _context.Quotes
+                .Include(quote => quote.Lines)
+                .FirstOrDefault(quote => quote.Id == purchaseOrder.QuoteId.Value);
+
+            if (string.IsNullOrWhiteSpace(purchaseOrder.SupplierName))
+            {
+                purchaseOrder.SupplierName = linkedQuote?.PartyName ?? "N/A";
+            }
+
+            // The order tracks the same items being purchased for the quote it was raised
+            // from, so seed its lines from the quote's when the caller didn't supply any.
+            if (purchaseOrder.Lines.Count == 0 && linkedQuote is not null)
+            {
+                purchaseOrder.Lines = linkedQuote.Lines.Select(line => new DocumentLine
+                {
+                    Description = line.Description,
+                    Quantity = line.Quantity,
+                    UnitPrice = line.UnitPrice,
+                    UnitOfMeasure = line.UnitOfMeasure
+                }).ToList();
+                purchaseOrder.RecalculateTotal();
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(purchaseOrder.SupplierName))
+        {
+            purchaseOrder.SupplierName = "N/A";
         }
 
         var created = _repository.Add(purchaseOrder);
