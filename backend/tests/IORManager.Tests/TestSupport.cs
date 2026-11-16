@@ -118,7 +118,7 @@ internal static class TestSupport
 
     private sealed class StubFinancialDocumentPdfService : IFinancialDocumentPdfService
     {
-        public byte[] GenerateQuotePdf(Invoice invoice) => [];
+        public byte[] GenerateQuotePdf(Invoice invoice, string? comments = null) => [];
 
         public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) => [];
 
@@ -129,10 +129,5 @@ internal static class TestSupport
         public byte[] GeneratePurchaseOrderPdf(PurchaseOrder purchaseOrder) => [];
 
         public byte[] GenerateInvoicesBatchPdf(IReadOnlyCollection<Invoice> invoices) => [];
-
-        byte[] IFinancialDocumentPdfService.GenerateQuotePdf(Invoice invoice, string? comments)
-        {
-            throw new NotImplementedException();
-        }
     }
 }
