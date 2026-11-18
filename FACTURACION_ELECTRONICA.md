@@ -51,14 +51,70 @@ Descarga y revisa estos documentos oficiales antes de ir a producción (enlazado
 - Formato Comprobante Fiscal Electrónico (e-CF) v1.0
 - Proceso de Certificación para ser Emisor Electrónico
 
-## Pasos para activar el módulo
+## Proceso oficial para ser Emisor Electrónico (según guía DGII, enero 2025)
 
-1. **Trámite ante la DGII**: solicita en la Oficina Virtual (Certificación → Emisor Electrónico) ser
-   emisor electrónico. La DGII te dará acceso a los ambientes TesteCF/CerteCF y, tras homologar, un
-   rango RFCE por cada tipo de comprobante que vayas a emitir.
-2. **Certificado digital**: tramita un certificado de firma digital con una entidad certificadora
+Esto es el trámite administrativo con la DGII — no se automatiza desde el código, hay que hacerlo
+en la Oficina Virtual (OFV) y en el portal de Certificación de Facturación Electrónica.
+
+### Requisitos previos
+
+- RNC inscrito y al día con tus obligaciones tributarias.
+- Clave de acceso a la OFV.
+- Certificado Digital para Procesos Tributarios, emitido por una entidad certificadora autorizada
+  por el INDOTEL, a nombre de la persona que representará a la empresa ante la DGII.
+- Formulario **FI-GDF-016** (Solicitud para ser Emisor Electrónico) completado.
+- Cumplimiento de la Norma General 06-2018 sobre Comprobantes Fiscales.
+
+### Las 3 etapas
+
+1. **Solicitud** — Envías el formulario FI-GDF-016 desde la OFV. La DGII valida que cumples los
+   requisitos y responde por el buzón de mensajería de la OFV con el enlace al portal de
+   Certificación de Facturación Electrónica más un usuario y clave para esa siguiente etapa.
+2. **Sets de pruebas** — En el portal de Certificación agotas tres bloques de pruebas:
+   - *Pruebas de Datos*
+   - *Pruebas de Simulación*
+   - *Pruebas de Comunicación* — aquí es donde este sistema entra en juego: usan los endpoints
+     `/api/invoices/{id}/ecf/emit`, `/ecf/status`, `/ecf/status/refresh` y `/ecf/xml` para demostrar
+     que el software genera, firma, envía y recibe el e-CF, el Acuse de Recibo y la Aprobación
+     Comercial, y que la Representación Impresa (RI, el PDF) cumple la norma.
+   Al pasar las tres, firmas la **Declaración Jurada** (formulario electrónico bajo fe de juramento)
+   confirmando que las pruebas se hicieron de forma íntegra.
+3. **Certificación** — La DGII te acredita como Emisor Electrónico. Se habilita el menú de
+   Facturación Electrónica en la OFV, desde donde solicitas los rangos e-NCF (RFCE) por cada tipo de
+   comprobante que vayas a emitir.
+
+### Obligaciones continuas una vez certificado
+
+- Firmar digitalmente cada e-CF — **ya implementado** (`XmlDsigEcfSigner`).
+- Emitir la Representación Impresa (RI) al receptor cuando este no sea electrónico — el PDF actual
+  **todavía no imprime el QR ni el código de seguridad** bajo la norma del e-CF; falta agregarlo al
+  `QuestPdfFinancialDocumentPdfService` una vez tengas el formato de URL del QR confirmado.
+- Recibir válidamente los e-CF de tus proveedores — **no implementado**: lo que construimos cubre
+  el rol de emisor (facturar), no el de receptor (recibir facturas electrónicas de terceros). Es un
+  flujo aparte si lo necesitas.
+- Conservar los e-CF y exhibirlos a la DGII cuando los requiera (Código Tributario).
+
+### Contingencias (reglas de la DGII, no implementadas en el sistema todavía)
+
+- Sin conectividad: generar los e-CF offline y enviarlos dentro de 72 horas.
+- Si no se puede emitir el e-CF en absoluto: usar comprobantes no electrónicos autorizados y enviar
+  los e-CF que los reemplazan dentro de 30 días calendario; esta contingencia no puede exceder 15
+  días calendario.
+- El sistema actual no tiene un modo de "cola offline" para estos casos — es una mejora pendiente si
+  tu operación lo necesita (ej. ventas en campo sin internet).
+
+### Facturador Gratuito (alternativa de la DGII, no aplica aquí)
+
+La DGII ofrece un facturador propio gratuito para quien no quiera desarrollar/mantener su propio
+software y facture como máximo 150 comprobantes al mes. Como ya tienes IORManager, el camino que
+construimos (software propio, vía "Solicitud → Pruebas → Certificación" arriba) es el que te
+corresponde, no el Facturador Gratuito.
+
+## Pasos para activar el módulo (técnico, una vez tengas acceso al portal de Certificación)
+
+1. **Certificado digital**: tramita un certificado de firma digital con una entidad certificadora
    autorizada por INDOTEL (la DGII no lo emite). Guarda el archivo `.p12`/`.pfx` en el servidor.
-3. **Configura `appsettings.json` (o variables de entorno equivalentes)**:
+2. **Configura `appsettings.json` (o variables de entorno equivalentes)**:
    ```json
    "Dgii": {
      "Environment": "TesteCF",
