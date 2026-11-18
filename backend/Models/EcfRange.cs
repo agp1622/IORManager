@@ -3,10 +3,15 @@ using System.ComponentModel.DataAnnotations;
 namespace IORManager.Models;
 
 /// <summary>
-/// A DGII-authorized RFCE (Rango de Facturación Comprobante Electrónico) — the block of e-NCF
-/// sequence numbers the DGII grants a taxpayer for one electronic document type (e.g. "31" for
-/// e-Crédito Fiscal / E31). Unlike traditional NCF sequences, e-CF numbers can only be generated
-/// inside a range the DGII has explicitly authorized, and that authorization expires.
+/// A DGII-authorized e-NCF numbering range — the block of e-NCF sequence numbers the DGII grants a
+/// taxpayer for one electronic document type (e.g. "31" for e-Crédito Fiscal / E31). Unlike
+/// traditional NCF sequences, e-CF numbers can only be generated inside a range the DGII has
+/// explicitly authorized, and that authorization expires.
+///
+/// Note on naming: this is NOT the "RFCE" (Resumen de Factura de Consumo Electrónica) — that's a
+/// distinct periodic summary document for low-value consumer invoices, which this system does not
+/// implement (see FACTURACION_ELECTRONICA.md). Avoid calling this class's concept "RFCE" to prevent
+/// confusing the two.
 /// </summary>
 public class EcfRange
 {

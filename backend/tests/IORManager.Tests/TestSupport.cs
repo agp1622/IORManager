@@ -83,6 +83,8 @@ internal static class TestSupport
             new NcfNumberGenerator(context),
             new EcfNumberGenerator(context),
             new StubEcfService(),
+            new EcfQrCodeGenerator(),
+            Microsoft.Extensions.Options.Options.Create(new DgiiOptions()),
             context);
     }
 
@@ -114,13 +116,16 @@ internal static class TestSupport
 
         public Task<EcfSubmission> RefreshStatusAsync(Guid invoiceId, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
+
+        public Task<EcfSubmission> RetrySendAsync(Guid invoiceId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 
     private sealed class StubFinancialDocumentPdfService : IFinancialDocumentPdfService
     {
         public byte[] GenerateQuotePdf(Invoice invoice, string? comments = null) => [];
 
-        public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) => [];
+        public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null, EcfPrintData? ecfPrintData = null) => [];
 
         public byte[] GenerateInvoiceWord(Invoice invoice, string? ncfNumber = null) => [];
 
@@ -129,5 +134,9 @@ internal static class TestSupport
         public byte[] GeneratePurchaseOrderPdf(PurchaseOrder purchaseOrder) => [];
 
         public byte[] GenerateInvoicesBatchPdf(IReadOnlyCollection<Invoice> invoices) => [];
+
+        public byte[] GenerateInvoicesBatchPdf(
+            IReadOnlyCollection<Invoice> invoices,
+            IReadOnlyDictionary<Guid, EcfPrintData>? ecfPrintDataByInvoiceId) => [];
     }
 }

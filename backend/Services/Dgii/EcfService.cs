@@ -8,6 +8,12 @@ namespace IORManager.Services.Dgii;
 
 public class EcfService : IEcfService
 {
+    /// <summary>
+    /// How long a signed e-CF may sit undelivered before it's overdue, per the DGII's contingency
+    /// rule for "falta de conectividad" (generate offline, send within 72 hours).
+    /// </summary>
+    public static readonly TimeSpan ContingencyWindow = TimeSpan.FromHours(72);
+
     private readonly IORManagerContext _context;
     private readonly IEcfXmlBuilder _xmlBuilder;
     private readonly IEcfSigner _signer;
@@ -78,13 +84,44 @@ public class EcfService : IEcfService
         submission.Status = EcfSubmissionStatus.Firmado;
         submission.UpdatedAt = DateTime.UtcNow;
 
+        await SendSignedDocumentAsync(submission, certificate, cancellationToken);
+        return submission;
+    }
+
+    public async Task<EcfSubmission> RetrySendAsync(Guid invoiceId, CancellationToken cancellationToken = default)
+    {
+        var submission = await _context.EcfSubmissions
+            .FirstOrDefaultAsync(existing => existing.InvoiceId == invoiceId, cancellationToken)
+            ?? throw new InvalidOperationException("This invoice has no e-CF submission yet.");
+
+        if (string.IsNullOrWhiteSpace(submission.SignedXml))
+        {
+            throw new InvalidOperationException("This e-CF has not been signed yet — nothing to resend.");
+        }
+
+        var certificate = _certificateProvider.GetSigningCertificate();
+        await SendSignedDocumentAsync(submission, certificate, cancellationToken);
+        return submission;
+    }
+
+    /// <summary>
+    /// Authenticates and submits an already-built-and-signed e-CF, updating the submission's status
+    /// from the DGII's response. On a transport/DGII failure, marks the submission as
+    /// <see cref="EcfSubmissionStatus.Contingencia"/> (starting the 72-hour clock the first time this
+    /// happens) rather than losing the already-signed document — it stays ready to resend.
+    /// </summary>
+    private async Task SendSignedDocumentAsync(
+        EcfSubmission submission,
+        System.Security.Cryptography.X509Certificates.X509Certificate2 certificate,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var token = await AuthenticateAsync(certificate, cancellationToken);
             var result = await _dgiiClient.EnviarAsync(
-                signature.SignedXml,
+                submission.SignedXml!,
                 _options.Emisor.Rnc,
-                invoice.NcfNumber,
+                submission.ENcf,
                 token.Token,
                 cancellationToken);
 
@@ -92,6 +129,7 @@ public class EcfService : IEcfService
             submission.TrackId = result.TrackId;
             submission.Status = MapDgiiStatus(result.Estado) ?? EcfSubmissionStatus.Enviado;
             submission.ResponseMessage = result.Mensaje;
+            submission.ContingencySince = null;
             if (submission.Status is EcfSubmissionStatus.Aceptado or EcfSubmissionStatus.Rechazado or EcfSubmissionStatus.AceptadoCondicional)
             {
                 submission.RespondedAt = DateTime.UtcNow;
@@ -99,12 +137,13 @@ public class EcfService : IEcfService
         }
         catch (Exception ex) when (ex is DgiiEcfClientException or HttpRequestException)
         {
-            submission.Status = EcfSubmissionStatus.Error;
+            submission.Status = EcfSubmissionStatus.Contingencia;
+            submission.ContingencySince ??= DateTime.UtcNow;
             submission.ResponseMessage = ex.Message;
         }
 
+        submission.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
-        return submission;
     }
 
     public async Task<EcfSubmission> RefreshStatusAsync(Guid invoiceId, CancellationToken cancellationToken = default)

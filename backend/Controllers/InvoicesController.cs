@@ -9,6 +9,7 @@ using IORManager.Services.Dgii;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace IORManager.Controllers;
 
@@ -22,6 +23,8 @@ public class InvoicesController : ControllerBase
     private readonly INcfNumberGenerator _ncfNumberGenerator;
     private readonly IEcfNumberGenerator _ecfNumberGenerator;
     private readonly IEcfService _ecfService;
+    private readonly IEcfQrCodeGenerator _ecfQrCodeGenerator;
+    private readonly DgiiOptions _dgiiOptions;
     private readonly IORManagerContext _context;
 
     public InvoicesController(
@@ -31,6 +34,8 @@ public class InvoicesController : ControllerBase
         INcfNumberGenerator ncfNumberGenerator,
         IEcfNumberGenerator ecfNumberGenerator,
         IEcfService ecfService,
+        IEcfQrCodeGenerator ecfQrCodeGenerator,
+        IOptions<DgiiOptions> dgiiOptions,
         IORManagerContext context)
     {
         _repository = repository;
@@ -39,6 +44,8 @@ public class InvoicesController : ControllerBase
         _ncfNumberGenerator = ncfNumberGenerator;
         _ecfNumberGenerator = ecfNumberGenerator;
         _ecfService = ecfService;
+        _ecfQrCodeGenerator = ecfQrCodeGenerator;
+        _dgiiOptions = dgiiOptions.Value;
         _context = context;
     }
 
@@ -211,6 +218,7 @@ public class InvoicesController : ControllerBase
 
         var invoices = _context.Invoices
             .Include(invoice => invoice.Lines)
+            .Include(invoice => invoice.Customer)
             .Where(invoice => request.Ids.Contains(invoice.Id))
             .ToList();
 
@@ -226,7 +234,7 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var pdfBytes = _pdfService.GenerateInvoicesBatchPdf(orderedInvoices);
+        var pdfBytes = _pdfService.GenerateInvoicesBatchPdf(orderedInvoices, BuildEcfPrintDataByInvoiceId(orderedInvoices));
         var fileName = orderedInvoices.Count == 1
             ? $"Invoice-{DocumentNumberFormatter.ToInvoiceNumber(orderedInvoices[0].Number)}.pdf"
             : $"Invoices-{DateTime.UtcNow:yyyyMMdd-HHmmss}.pdf";
@@ -249,6 +257,7 @@ public class InvoicesController : ControllerBase
 
         var invoices = _context.Invoices
             .Include(invoice => invoice.Lines)
+            .Include(invoice => invoice.Customer)
             .Where(invoice => request.Ids.Contains(invoice.Id))
             .ToList();
 
@@ -263,7 +272,7 @@ public class InvoicesController : ControllerBase
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var invoice in invoices)
             {
-                var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, invoice.NcfNumber);
+                var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, invoice.NcfNumber, BuildEcfPrintData(invoice));
                 var baseName = $"Invoice-{DocumentNumberFormatter.ToInvoiceNumber(invoice.Number)}";
                 var entryName = $"{baseName}.pdf";
                 var suffix = 2;
@@ -344,7 +353,7 @@ public class InvoicesController : ControllerBase
         {
             return BadRequest(new ProblemDetails
             {
-                Title = "No RFCE range configured",
+                Title = "No e-NCF numbering range configured",
                 Detail = $"No DGII-authorized numbering range is configured for \"{normalizedCategory}\" yet.",
             });
         }
@@ -385,7 +394,7 @@ public class InvoicesController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Lists the DGII-authorized RFCE numbering ranges configured for each electronic NCF category.</summary>
+    /// <summary>Lists the DGII-authorized e-NCF numbering ranges configured for each electronic NCF category.</summary>
     [HttpGet("ecf-ranges")]
     public ActionResult<IReadOnlyCollection<EcfRangeResponse>> GetEcfRanges()
     {
@@ -412,7 +421,7 @@ public class InvoicesController : ControllerBase
         return Ok(responses);
     }
 
-    /// <summary>Records a DGII-authorized RFCE numbering range for one electronic NCF category (e.g. "E31").</summary>
+    /// <summary>Records a DGII-authorized e-NCF numbering range for one electronic NCF category (e.g. "E31").</summary>
     [HttpPut("ecf-ranges/{categoryCode}")]
     [Authorize(Roles = "Admin")]
     public ActionResult SetEcfRange(string categoryCode, [FromBody] EcfRangeSetRequest request)
@@ -494,6 +503,57 @@ public class InvoicesController : ControllerBase
         return File(System.Text.Encoding.UTF8.GetBytes(submission.SignedXml), "application/xml", $"{submission.ENcf}.xml");
     }
 
+    /// <summary>
+    /// Re-attempts sending an e-CF that's stuck in contingency (already signed but not yet
+    /// transmitted) without rebuilding or re-signing it. Also reachable manually; the background
+    /// <see cref="IORManager.Services.Dgii.EcfContingencyRetryService"/> calls the same service method
+    /// automatically every 15 minutes.
+    /// </summary>
+    [HttpPost("{id:guid}/ecf/retry")]
+    public async Task<ActionResult<EcfSubmissionResponse>> RetryEcf(Guid id)
+    {
+        try
+        {
+            var submission = await _ecfService.RetrySendAsync(id);
+            return Ok(ToEcfSubmissionResponse(submission));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new ProblemDetails { Title = "No se pudo reintentar el envío", Detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lists invoices whose e-CF is stuck in contingency (signed locally but not yet accepted by the
+    /// DGII), e.g. during a connectivity outage. Per DGII rules these must reach the DGII within 72
+    /// hours of <c>ContingencySince</c> — <c>Overdue</c> flags the ones past that window needing a
+    /// manual decision.
+    /// </summary>
+    [HttpGet("ecf-contingencies")]
+    public ActionResult<IReadOnlyCollection<EcfContingencyResponse>> GetEcfContingencies()
+    {
+        var contingencies = _context.EcfSubmissions
+            .AsNoTracking()
+            .Where(submission => submission.Status == EcfSubmissionStatus.Contingencia && submission.ContingencySince != null)
+            .Join(
+                _context.Invoices.IgnoreQueryFilters(),
+                submission => submission.InvoiceId,
+                invoice => invoice.Id,
+                (submission, invoice) => new { submission, invoice.Number })
+            .ToList()
+            .Select(entry => new EcfContingencyResponse(
+                entry.submission.InvoiceId,
+                entry.Number,
+                entry.submission.ENcf,
+                entry.submission.ContingencySince!.Value,
+                DateTime.UtcNow - entry.submission.ContingencySince!.Value > EcfService.ContingencyWindow,
+                entry.submission.ResponseMessage))
+            .OrderByDescending(entry => entry.ContingencySince)
+            .ToList();
+
+        return Ok(contingencies);
+    }
+
     private static EcfSubmissionResponse ToEcfSubmissionResponse(EcfSubmission submission) => new(
         submission.InvoiceId,
         submission.ENcf,
@@ -504,7 +564,9 @@ public class InvoicesController : ControllerBase
         submission.ResponseMessage,
         submission.SignedAt,
         submission.SubmittedAt,
-        submission.RespondedAt);
+        submission.RespondedAt,
+        submission.ContingencySince,
+        submission.ContingencySince.HasValue && DateTime.UtcNow - submission.ContingencySince.Value > EcfService.ContingencyWindow);
 
     [HttpPost]
     public ActionResult<InvoiceCreateResponse> CreateInvoice([FromBody] InvoiceCreateRequest request)
@@ -594,7 +656,7 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, invoice.NcfNumber);
+        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, invoice.NcfNumber, BuildEcfPrintData(invoice));
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
     }
@@ -622,7 +684,7 @@ public class InvoicesController : ControllerBase
             return errorResult!;
         }
 
-        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, normalizedNcf);
+        var pdfBytes = _pdfService.GenerateInvoicePdf(invoice, normalizedNcf, BuildEcfPrintData(invoice));
         var invoiceNumber = DocumentNumberFormatter.ToInvoiceNumber(invoice.Number);
         return File(pdfBytes, "application/pdf", $"Invoice-{invoiceNumber}.pdf");
     }
@@ -688,7 +750,7 @@ public class InvoicesController : ControllerBase
             .Include(existing => existing.Lines)
             .FirstOrDefault(existing => existing.Id == id);
 
-    /// <summary>Routes NCF generation to the e-CF (DGII RFCE range) generator for electronic categories.</summary>
+    /// <summary>Routes NCF generation to the e-CF (DGII e-NCF range) generator for electronic categories.</summary>
     private string GenerateNcf(string categoryCode) =>
         NcfCategoryCatalog.TryGetByCode(categoryCode, out var definition) && definition.IsElectronic
             ? _ecfNumberGenerator.GenerateNextNumber(categoryCode)
@@ -795,6 +857,84 @@ public class InvoicesController : ControllerBase
             invoice.EcfSecurityCode = submission.SecurityCode;
             invoice.EcfResponseMessage = submission.ResponseMessage;
         }
+    }
+
+    /// <summary>
+    /// Builds the QR code + security code to print on an e-CF invoice's Representación Impresa (RI),
+    /// or null if the invoice has no electronic NCF, no signed e-CF yet, or no verification URL is
+    /// configured for the active DGII environment.
+    /// </summary>
+    private EcfPrintData? BuildEcfPrintData(Invoice invoice)
+    {
+        if (string.IsNullOrWhiteSpace(invoice.NcfNumber) ||
+            string.IsNullOrWhiteSpace(invoice.NcfCategory) ||
+            !NcfCategoryCatalog.TryGetByCode(invoice.NcfCategory, out var definition) ||
+            !definition.IsElectronic)
+        {
+            return null;
+        }
+
+        var submission = _context.EcfSubmissions
+            .AsNoTracking()
+            .FirstOrDefault(existing => existing.InvoiceId == invoice.Id);
+        if (submission is null || string.IsNullOrWhiteSpace(submission.SecurityCode) || !submission.SignedAt.HasValue)
+        {
+            return null;
+        }
+
+        string? verificationBaseUrl;
+        try
+        {
+            verificationBaseUrl = _dgiiOptions.GetActiveEndpoints().VerificationBaseUrl;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(verificationBaseUrl))
+        {
+            return null;
+        }
+
+        var rncComprador = invoice.Customer?.Rnc;
+        if (string.IsNullOrWhiteSpace(rncComprador) && invoice.CustomerId.HasValue)
+        {
+            rncComprador = _context.Customers
+                .AsNoTracking()
+                .Where(customer => customer.Id == invoice.CustomerId.Value)
+                .Select(customer => customer.Rnc)
+                .FirstOrDefault();
+        }
+
+        var (subtotal, _, itbisAmount) = invoice.CalculateFinancials();
+        var qrCodeData = new EcfQrCodeData(
+            RncEmisor: _dgiiOptions.Emisor.Rnc,
+            RncComprador: rncComprador,
+            ENcf: invoice.NcfNumber,
+            FechaEmision: invoice.InvoiceDate,
+            MontoTotal: subtotal + itbisAmount,
+            FechaFirmaUtc: submission.SignedAt.Value,
+            CodigoSeguridad: submission.SecurityCode,
+            VerificationBaseUrl: verificationBaseUrl);
+
+        var qrCodePng = _ecfQrCodeGenerator.GeneratePng(qrCodeData);
+        return new EcfPrintData(invoice.NcfNumber, submission.SecurityCode, submission.SignedAt.Value, qrCodePng);
+    }
+
+    private Dictionary<Guid, EcfPrintData> BuildEcfPrintDataByInvoiceId(IEnumerable<Invoice> invoices)
+    {
+        var result = new Dictionary<Guid, EcfPrintData>();
+        foreach (var invoice in invoices)
+        {
+            var printData = BuildEcfPrintData(invoice);
+            if (printData is not null)
+            {
+                result[invoice.Id] = printData;
+            }
+        }
+
+        return result;
     }
 
     [HttpPost("{id:guid}/ncf")]

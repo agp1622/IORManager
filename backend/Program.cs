@@ -90,6 +90,7 @@ public class Program
         builder.Services.AddSingleton<IEcfXmlBuilder, EcfXmlBuilder>();
         builder.Services.AddSingleton<IEcfSigner, XmlDsigEcfSigner>();
         builder.Services.AddSingleton<IEcfCertificateProvider, DgiiCertificateProvider>();
+        builder.Services.AddSingleton<IEcfQrCodeGenerator, EcfQrCodeGenerator>();
         builder.Services.AddScoped<IEcfService, EcfService>();
         builder.Services.AddHttpClient<IDgiiEcfClient, DgiiEcfClient>();
 
@@ -98,6 +99,7 @@ public class Program
 
         // Permanently purges invoices/quotes once their 1-year soft-delete recovery window elapses.
         builder.Services.AddHostedService<SoftDeletePurgeService>();
+        builder.Services.AddHostedService<EcfContingencyRetryService>();
 
         RegisterRepositories(builder.Services);
 

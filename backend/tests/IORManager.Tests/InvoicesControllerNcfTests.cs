@@ -29,7 +29,7 @@ public class InvoicesControllerNcfTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var problem = Assert.IsType<ProblemDetails>(badRequest.Value);
-        Assert.Equal("No RFCE range configured", problem.Title);
+        Assert.Equal("No e-NCF numbering range configured", problem.Title);
     }
 
     [Fact]

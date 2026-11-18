@@ -516,7 +516,9 @@ const DocumentList = ({
                           className={`pill ${
                             document.ecfStatus === 'Aceptado'
                               ? 'pill--success'
-                              : document.ecfStatus === 'Rechazado' || document.ecfStatus === 'Error'
+                              : document.ecfStatus === 'Rechazado' ||
+                                  document.ecfStatus === 'Error' ||
+                                  document.ecfStatus === 'Contingencia'
                                 ? 'pill--error'
                                 : document.ecfStatus === 'AceptadoCondicional'
                                   ? 'pill--warning'
@@ -713,6 +715,7 @@ function App() {
   const [markingUnsentId, setMarkingUnsentId] = useState(null)
   const [emittingEcfId, setEmittingEcfId] = useState(null)
   const [refreshingEcfId, setRefreshingEcfId] = useState(null)
+  const [retryingEcfId, setRetryingEcfId] = useState(null)
   const [markingPoStatusId, setMarkingPoStatusId] = useState(null)
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(() => new Set())
   const [isDownloadingSelectedPdf, setIsDownloadingSelectedPdf] = useState(false)
@@ -1891,6 +1894,42 @@ function App() {
         })
       } finally {
         setRefreshingEcfId(null)
+      }
+    },
+    [activeSection, loadSection, translate],
+  )
+
+  const handleRetryEcf = useCallback(
+    async (doc) => {
+      if (!doc?.id) {
+        return
+      }
+
+      try {
+        setRetryingEcfId(doc.id)
+        const response = await apiFetch(`${API_BASE_URL}/Invoices/${doc.id}/ecf/retry`, {
+          method: 'POST',
+        })
+
+        if (!response.ok) {
+          let detail = translate('documentList.ecfRetryError')
+          try {
+            const body = await response.json()
+            detail = body?.title || body?.detail || detail
+          } catch {
+            // Ignore parse errors and use fallback text.
+          }
+          throw new Error(detail)
+        }
+
+        await loadSection(activeSection)
+      } catch (error) {
+        setStatus({
+          type: 'error',
+          message: error.message || translate('documentList.ecfRetryError'),
+        })
+      } finally {
+        setRetryingEcfId(null)
       }
     },
     [activeSection, loadSection, translate],
@@ -3127,6 +3166,14 @@ function App() {
           variant: 'button--ghost',
         },
         {
+          label: translate('documentList.ecfRetry'),
+          loadingLabel: translate('documentList.ecfRetrying'),
+          busyId: retryingEcfId,
+          isVisible: (doc) => doc?.ecfStatus === 'Contingencia',
+          onClick: handleRetryEcf,
+          variant: 'button--ghost',
+        },
+        {
           label: translate('documentList.markPaid'),
           loadingLabel: translate('documentList.markingPaid'),
           busyId: markingPaidId,
@@ -3246,6 +3293,7 @@ function App() {
     handleMarkInvoiceSent,
     handleMarkInvoiceUnsent,
     handleRefreshEcfStatus,
+    handleRetryEcf,
     handleUpdatePurchaseOrderStatus,
     handleOpenAttachmentsDialog,
     handleOpenNcfDialog,
@@ -3260,6 +3308,7 @@ function App() {
     isQuotesSection,
     emittingEcfId,
     refreshingEcfId,
+    retryingEcfId,
     markingPaidId,
     markingUnpaidId,
     markingSentId,

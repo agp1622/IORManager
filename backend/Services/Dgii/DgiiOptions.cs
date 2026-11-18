@@ -72,4 +72,10 @@ public class DgiiEnvironmentEndpoints
 
     /// <summary>Base URL for querying submission status (ConsultaResultado).</summary>
     public string StatusBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Base URL for the public "ConsultaTimbre" e-CF verification page, encoded in the QR code
+    /// printed on the Representación Impresa (RI).
+    /// </summary>
+    public string VerificationBaseUrl { get; set; } = string.Empty;
 }

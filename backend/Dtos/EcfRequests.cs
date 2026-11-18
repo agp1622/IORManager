@@ -1,6 +1,6 @@
 namespace IORManager.Dtos;
 
-/// <summary>Request body for PUT /api/invoices/ecf-ranges/{categoryCode}, recording a DGII-authorized RFCE range.</summary>
+/// <summary>Request body for PUT /api/invoices/ecf-ranges/{categoryCode}, recording a DGII-authorized e-NCF numbering range.</summary>
 public record EcfRangeSetRequest(long RangeStart, long RangeEnd, DateOnly? AuthorizedAt, DateOnly? ExpiresAt);
 
 public record EcfRangeResponse(
@@ -23,4 +23,15 @@ public record EcfSubmissionResponse(
     string? ResponseMessage,
     DateTime? SignedAt,
     DateTime? SubmittedAt,
-    DateTime? RespondedAt);
+    DateTime? RespondedAt,
+    DateTime? ContingencySince,
+    bool ContingencyOverdue);
+
+/// <summary>One row of GET /api/invoices/ecf-contingencies — e-CFs stuck waiting to reach the DGII.</summary>
+public record EcfContingencyResponse(
+    Guid InvoiceId,
+    string InvoiceNumber,
+    string ENcf,
+    DateTime ContingencySince,
+    bool Overdue,
+    string? ResponseMessage);

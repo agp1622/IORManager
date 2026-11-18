@@ -9,6 +9,7 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using WordDoc = DocumentFormat.OpenXml.Wordprocessing.Document;
 using WordColor = DocumentFormat.OpenXml.Wordprocessing.Color;
 using IORManager.Models;
+using IORManager.Services.Dgii;
 using QuestPDF.Drawing;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -54,16 +55,24 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     public byte[] GenerateQuotePdf(Invoice invoice, string? comments = null) =>
         GenerateInvoiceDocument(invoice, isQuote: true, ncfNumber: null, comments: comments);
 
-    public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null) =>
-        GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber);
+    public byte[] GenerateInvoicePdf(Invoice invoice, string? ncfNumber = null, EcfPrintData? ecfPrintData = null) =>
+        GenerateInvoiceDocument(invoice, isQuote: false, ncfNumber, ecfPrintData: ecfPrintData);
 
-    public byte[] GenerateInvoicesBatchPdf(IReadOnlyCollection<Invoice> invoices)
+    public byte[] GenerateInvoicesBatchPdf(IReadOnlyCollection<Invoice> invoices) =>
+        GenerateInvoicesBatchPdf(invoices, ecfPrintDataByInvoiceId: null);
+
+    public byte[] GenerateInvoicesBatchPdf(
+        IReadOnlyCollection<Invoice> invoices,
+        IReadOnlyDictionary<Guid, EcfPrintData>? ecfPrintDataByInvoiceId)
     {
         var doc = QuestPdfDocument.Create(document =>
         {
             foreach (var invoice in invoices)
             {
-                ComposeInvoiceBatchPage(document, invoice);
+                var ecfPrintData = ecfPrintDataByInvoiceId is not null && ecfPrintDataByInvoiceId.TryGetValue(invoice.Id, out var data)
+                    ? data
+                    : null;
+                ComposeInvoiceBatchPage(document, invoice, ecfPrintData);
             }
         });
 
@@ -78,7 +87,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
     /// page to an already-open <see cref="QuestPdfDocument"/> instead of creating a standalone one — that's the
     /// only way to combine several invoices into a single PDF file rather than one file per invoice.
     /// </summary>
-    private static void ComposeInvoiceBatchPage(IDocumentContainer document, Invoice invoice)
+    private static void ComposeInvoiceBatchPage(IDocumentContainer document, Invoice invoice, EcfPrintData? ecfPrintData)
     {
         var resources = GetInvoiceResources(invoice.CultureName, asQuote: false);
         var culture = resources.Culture;
@@ -147,7 +156,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 column.Item().Element(totalContainer => ComposeTotals(totalContainer, totals));
             });
 
-            page.Footer().Element(footerContainer => ComposeFooterNotes(footerContainer, footerNotes));
+            page.Footer().Element(footerContainer => ComposeDocumentFooter(footerContainer, footerNotes, ecfPrintData));
         });
     }
 
@@ -221,7 +230,12 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         return ms.ToArray();
     }
 
-    private byte[] GenerateInvoiceDocument(Invoice invoice, bool isQuote, string? ncfNumber, string? comments = null)
+    private byte[] GenerateInvoiceDocument(
+        Invoice invoice,
+        bool isQuote,
+        string? ncfNumber,
+        string? comments = null,
+        EcfPrintData? ecfPrintData = null)
     {
         var resources = GetInvoiceResources(invoice.CultureName, isQuote);
         var culture = resources.Culture;
@@ -286,7 +300,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
             footerNotes: GetFooterNotes(culture),
             culture: culture,
             ncfNumber: invoiceNcf,
-            comments: isQuote ? comments : null);
+            comments: isQuote ? comments : null,
+            ecfPrintData: isQuote ? null : ecfPrintData);
     }
 
     public byte[] GenerateReceiptPdf(Receipt receipt)
@@ -373,7 +388,8 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
         IReadOnlyCollection<string> footerNotes,
         CultureInfo culture,
         string? ncfNumber = null,
-        string? comments = null)
+        string? comments = null,
+        EcfPrintData? ecfPrintData = null)
     {
         metadata ??= Array.Empty<(string, string)>();
         totals ??= Array.Empty<(string, string)>();
@@ -412,12 +428,7 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 });
 
                 page.Footer().Element(footerContainer =>
-                {
-                    if (footerNotes.Count > 0)
-                    {
-                        ComposeFooterNotes(footerContainer, footerNotes);
-                    }
-                });
+                    ComposeDocumentFooter(footerContainer, footerNotes, ecfPrintData));
             });
         });
 
@@ -560,6 +571,46 @@ public class QuestPdfFinancialDocumentPdfService : IFinancialDocumentPdfService
                 column.Spacing(6);
                 column.Item().Text(label).SemiBold().FontSize(11).FontColor(SecondaryTextColor);
                 column.Item().Text(comments).FontSize(10.5f).FontColor(PrimaryTextColor);
+            });
+    }
+
+    /// <summary>
+    /// The e-CF QR stamp (bottom-left, per DGII requirement) plus the existing footer notes.
+    /// </summary>
+    private static void ComposeDocumentFooter(
+        IContainer container,
+        IReadOnlyCollection<string> footerNotes,
+        EcfPrintData? ecfPrintData)
+    {
+        container.Column(column =>
+        {
+            if (ecfPrintData is not null)
+            {
+                column.Item().Element(stamp => ComposeEcfStamp(stamp, ecfPrintData));
+            }
+
+            if (footerNotes.Count > 0)
+            {
+                column.Item().Element(notes => ComposeFooterNotes(notes, footerNotes));
+            }
+        });
+    }
+
+    private static void ComposeEcfStamp(IContainer container, EcfPrintData ecfPrintData)
+    {
+        container
+            .PaddingTop(4)
+            .AlignLeft()
+            .Row(row =>
+            {
+                row.ConstantItem(72).Height(72).Image(ecfPrintData.QrCodePng);
+                row.RelativeItem().PaddingLeft(8).AlignMiddle().Column(column =>
+                {
+                    column.Spacing(1);
+                    column.Item().Text($"e-NCF: {ecfPrintData.ENcf}").FontSize(7.5f).SemiBold().FontColor(SecondaryTextColor);
+                    column.Item().Text($"Código de seguridad: {ecfPrintData.SecurityCode}").FontSize(7.5f).FontColor(SecondaryTextColor);
+                    column.Item().Text($"Firmado: {ecfPrintData.SignedAtUtc:dd-MM-yyyy HH:mm:ss}").FontSize(7.5f).FontColor(SecondaryTextColor);
+                });
             });
     }
 

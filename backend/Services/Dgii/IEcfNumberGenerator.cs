@@ -4,7 +4,7 @@ public interface IEcfNumberGenerator
 {
     /// <summary>
     /// Generates and reserves the next e-NCF for the given electronic NCF category (e.g. "E31").
-    /// Throws <see cref="InvalidOperationException"/> if no RFCE range is configured for that
+    /// Throws <see cref="InvalidOperationException"/> if no e-NCF numbering range is configured for that
     /// document type, the range is exhausted, or its DGII authorization has expired.
     /// </summary>
     string GenerateNextNumber(string categoryCode);
@@ -13,7 +13,7 @@ public interface IEcfNumberGenerator
     string? PeekNextNumber(string categoryCode);
 
     /// <summary>
-    /// Records a DGII-authorized RFCE range for a document type. Call this once the DGII grants (or
+    /// Records a DGII-authorized e-NCF numbering range for a document type. Call this once the DGII grants (or
     /// renews) a numbering range for an e-CF document type.
     /// </summary>
     void SetRange(string categoryCode, long rangeStart, long rangeEnd, DateOnly? authorizedAt, DateOnly? expiresAt);

@@ -17,7 +17,7 @@ public class EcfNumberGenerator : IEcfNumberGenerator
     public string GenerateNextNumber(string categoryCode) =>
         Execute(categoryCode, advanceSequence: true)
         ?? throw new InvalidOperationException(
-            $"No RFCE range is configured for \"{categoryCode}\". Ask the DGII for a numbering " +
+            $"No e-NCF numbering range is configured for \"{categoryCode}\". Ask the DGII for a numbering " +
             "range and register it before issuing this document type.");
 
     public string? PeekNextNumber(string categoryCode) => Execute(categoryCode, advanceSequence: false);
@@ -31,7 +31,7 @@ public class EcfNumberGenerator : IEcfNumberGenerator
     {
         if (rangeStart < 1 || rangeEnd < rangeStart)
         {
-            throw new ArgumentException("Invalid RFCE range: start must be >= 1 and end must be >= start.");
+            throw new ArgumentException("Invalid e-NCF numbering range: start must be >= 1 and end must be >= start.");
         }
 
         var documentTypeCode = ToDocumentTypeCode(categoryCode);
@@ -76,7 +76,7 @@ public class EcfNumberGenerator : IEcfNumberGenerator
             if (range.ExpiresAt.HasValue && range.ExpiresAt.Value < DateOnly.FromDateTime(DateTime.UtcNow))
             {
                 throw new InvalidOperationException(
-                    $"The RFCE range for \"{categoryCode}\" expired on {range.ExpiresAt:yyyy-MM-dd}. " +
+                    $"The e-NCF numbering range for \"{categoryCode}\" expired on {range.ExpiresAt:yyyy-MM-dd}. " +
                     "Request a new range from the DGII before issuing this document type.");
             }
 
@@ -87,7 +87,7 @@ public class EcfNumberGenerator : IEcfNumberGenerator
                 if (candidate > range.RangeEnd)
                 {
                     throw new InvalidOperationException(
-                        $"The RFCE range for \"{categoryCode}\" ({range.RangeStart}-{range.RangeEnd}) is exhausted. " +
+                        $"The e-NCF numbering range for \"{categoryCode}\" ({range.RangeStart}-{range.RangeEnd}) is exhausted. " +
                         "Request a new range from the DGII.");
                 }
 

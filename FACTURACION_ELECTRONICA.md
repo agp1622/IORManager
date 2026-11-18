@@ -5,11 +5,11 @@ comprobantes reales, y cómo activar el módulo paso a paso.
 
 ## Qué se implementó
 
-- **Modelo de datos**: `EcfRange` (rangos RFCE autorizados por la DGII por tipo de comprobante) y
+- **Modelo de datos**: `EcfRange` (rangos de numeración e-NCF autorizados por la DGII por tipo de comprobante) y
   `EcfSubmission` (ciclo de vida del e-CF de cada factura: XML, firma, envío, respuesta de la DGII).
   `Customer.Rnc` para identificar al comprador.
 - **Numeración electrónica**: `IEcfNumberGenerator` genera e-NCF (formato `E` + 2 dígitos de tipo +
-  10 dígitos de secuencia) únicamente dentro de un rango RFCE previamente registrado, y rechaza la
+  10 dígitos de secuencia) únicamente dentro de un rango de numeración e-NCF previamente registrado, y rechaza la
   generación si el rango está agotado o vencido.
 - **XML del e-CF**: `IEcfXmlBuilder` arma el XML (`ECF/Encabezado/IdDoc/Emisor/Comprador/Totales`,
   `DetallesItems`, `InformacionReferencia` para notas) siguiendo la estructura documentada por la
@@ -20,9 +20,19 @@ comprobantes reales, y cómo activar el módulo paso a paso.
   propio certificado).
 - **Cliente DGII**: `DgiiEcfClient` implementa el flujo de autenticación (semilla → validar semilla →
   token) y el envío/consulta de estado, configurable por ambiente (TesteCF/CerteCF/Producción).
+- **Representación Impresa (RI)**: `EcfQrCodeGenerator` arma la URL de verificación "ConsultaTimbre"
+  de la DGII y la imprime como código QR en la esquina inferior izquierda del PDF, junto al e-NCF, el
+  código de seguridad y la fecha/hora de la firma — ver `QuestPdfFinancialDocumentPdfService`.
+- **Contingencia por falta de conectividad**: si el envío a la DGII falla (red/DGII caída), el
+  e-CF ya generado y firmado no se pierde — queda en estado `Contingencia` con un reloj de 72 horas
+  (`EcfSubmission.ContingencySince`). `EcfContingencyRetryService` reintenta el envío automáticamente
+  cada 15 minutos sin volver a firmar el documento (la firma y el código de seguridad deben quedarse
+  exactamente igual), y registra una advertencia si una contingencia supera las 72 horas. También se
+  puede forzar un reintento manual con `POST /api/invoices/{id}/ecf/retry`, y
+  `GET /api/invoices/ecf-contingencies` lista las facturas pendientes.
 - **Orquestación**: `EcfService` conecta todo lo anterior; se expone vía `InvoicesController`
-  (`/api/invoices/{id}/ecf/emit`, `/ecf/status`, `/ecf/status/refresh`, `/ecf/xml`,
-  `/api/invoices/ecf-ranges`).
+  (`/api/invoices/{id}/ecf/emit`, `/ecf/status`, `/ecf/status/refresh`, `/ecf/retry`, `/ecf/xml`,
+  `/api/invoices/ecf-ranges`, `/api/invoices/ecf-contingencies`).
 
 ## Qué falta verificar antes de producción
 
@@ -42,6 +52,11 @@ comprobantes reales**:
    secciones propias (E41 compras, E46 exportaciones, E47 pagos al exterior) y los códigos de
    `IndicadorFacturacion` por línea — ver `backend/Services/Dgii/EcfXmlBuilder.cs`.
 4. **Perfil exacto de XAdES** que exige la DGII (se implementó XAdES-BES estándar).
+5. **Nombres exactos de los parámetros del QR** (`backend/Services/Dgii/EcfQrCodeGenerator.cs`): se
+   usó el patrón `RncEmisor/RncComprador/ENCF/FechaEmision/MontoTotal/FechaFirma/CodigoSeguridad`
+   sobre `ConsultaTimbre`, y la URL base por ambiente (`Dgii:Endpoints:*:VerificationBaseUrl`) — esto
+   también debe verificarse contra "Preguntas Frecuentes e-CF Generales" y escaneando un QR real en
+   TesteCF.
 
 Descarga y revisa estos documentos oficiales antes de ir a producción (enlazados desde el
 [portal de documentación e-CF de la DGII](https://dgii.gov.do/cicloContribuyente/facturacion/comprobantesFiscalesElectronicosE-CF/Paginas/documentacionSobreE-CF.aspx)):
@@ -80,28 +95,33 @@ en la Oficina Virtual (OFV) y en el portal de Certificación de Facturación Ele
    Al pasar las tres, firmas la **Declaración Jurada** (formulario electrónico bajo fe de juramento)
    confirmando que las pruebas se hicieron de forma íntegra.
 3. **Certificación** — La DGII te acredita como Emisor Electrónico. Se habilita el menú de
-   Facturación Electrónica en la OFV, desde donde solicitas los rangos e-NCF (RFCE) por cada tipo de
+   Facturación Electrónica en la OFV, desde donde solicitas los rangos de numeración e-NCF por cada tipo de
    comprobante que vayas a emitir.
 
 ### Obligaciones continuas una vez certificado
 
 - Firmar digitalmente cada e-CF — **ya implementado** (`XmlDsigEcfSigner`).
-- Emitir la Representación Impresa (RI) al receptor cuando este no sea electrónico — el PDF actual
-  **todavía no imprime el QR ni el código de seguridad** bajo la norma del e-CF; falta agregarlo al
-  `QuestPdfFinancialDocumentPdfService` una vez tengas el formato de URL del QR confirmado.
+- Emitir la Representación Impresa (RI) al receptor cuando este no sea electrónico — **ya
+  implementado**: el PDF imprime el código QR y el código de seguridad (ver arriba). Pendiente de
+  verificar los nombres exactos de los parámetros del QR contra el documento oficial antes de
+  producción.
 - Recibir válidamente los e-CF de tus proveedores — **no implementado**: lo que construimos cubre
   el rol de emisor (facturar), no el de receptor (recibir facturas electrónicas de terceros). Es un
   flujo aparte si lo necesitas.
 - Conservar los e-CF y exhibirlos a la DGII cuando los requiera (Código Tributario).
 
-### Contingencias (reglas de la DGII, no implementadas en el sistema todavía)
+### Contingencias
 
-- Sin conectividad: generar los e-CF offline y enviarlos dentro de 72 horas.
-- Si no se puede emitir el e-CF en absoluto: usar comprobantes no electrónicos autorizados y enviar
-  los e-CF que los reemplazan dentro de 30 días calendario; esta contingencia no puede exceder 15
-  días calendario.
-- El sistema actual no tiene un modo de "cola offline" para estos casos — es una mejora pendiente si
-  tu operación lo necesita (ej. ventas en campo sin internet).
+- **Sin conectividad (automatizado)**: si el envío falla, el e-CF ya firmado se marca
+  `Contingencia` y un job en segundo plano (`EcfContingencyRetryService`) reintenta el envío cada 15
+  minutos durante la ventana de 72 horas que exige la DGII, sin volver a firmar el documento. Pasadas
+  las 72 horas sin éxito, el sistema sigue reintentando pero además deja una advertencia en los logs
+  — en ese punto es una decisión humana, no automática.
+- **No se puede emitir el e-CF en absoluto (manual, no implementado)**: la norma permite usar
+  comprobantes no electrónicos de respaldo y enviar los e-CF que los reemplazan dentro de 30 días
+  calendario (contingencia máxima de 15 días). Esto implica decidir qué secuencia NCF tradicional
+  usar y cómo correlacionarla después con el e-CF definitivo — es un proceso de negocio, no solo
+  técnico, y queda fuera del alcance de esta primera versión.
 
 ### Facturador Gratuito (alternativa de la DGII, no aplica aquí)
 
@@ -124,7 +144,7 @@ corresponde, no el Facturador Gratuito.
    ```
    No subas el certificado ni la contraseña al repositorio — usa variables de entorno o un secret
    manager en producción.
-4. **Registra los rangos RFCE** que te otorgue la DGII:
+4. **Registra los rangos de numeración e-NCF** que te otorgue la DGII:
    `PUT /api/invoices/ecf-ranges/{categoryCode}` (ej. `E31`) con
    `{ "rangeStart": 1, "rangeEnd": 5000, "authorizedAt": "2026-08-01", "expiresAt": "2027-12-31" }`.
 5. **Prueba en TesteCF** con facturas reales de tu operación antes de solicitar el paso a CerteCF y
@@ -142,3 +162,10 @@ corresponde, no el Facturador Gratuito.
 - Los tipos E41/E43-E47 comparten el mismo armado de XML "base"; si alguno requiere secciones
   adicionales específicas (compras, exportación, pagos al exterior) hay que ampliarlas en
   `EcfXmlBuilder` una vez confirmado el formato exacto.
+- No se implementa el flujo de recepción de e-CF de terceros (cuando tú eres el comprador), ni la
+  contingencia de "no se puede emitir el e-CF en absoluto" (reemplazo por comprobante físico) — ver
+  la sección de Contingencias arriba.
+- El PDF de la Representación Impresa siempre usa el formato "ConsultaTimbre"; el "Resumen de
+  Factura de Consumo Electrónica" (RFCE, el documento periódico para facturas de consumo menores a
+  RD$250,000) no está implementado — este sistema envía cada e-CF individualmente vía Recepción
+  independientemente del monto.

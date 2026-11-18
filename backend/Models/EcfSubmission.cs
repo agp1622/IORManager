@@ -55,6 +55,13 @@ public class EcfSubmission
 
     public DateTime? RespondedAt { get; set; }
 
+    /// <summary>
+    /// Set the first time a submission attempt fails to reach the DGII (network/DGII outage). Marks
+    /// the start of the 72-hour contingency window the DGII allows for sending an e-CF that was
+    /// generated and signed offline. Cleared once the e-CF is successfully transmitted.
+    /// </summary>
+    public DateTime? ContingencySince { get; set; }
+
     /// <summary>Latest status message / validation errors reported by the DGII.</summary>
     [MaxLength(4000)]
     public string? ResponseMessage { get; set; }
@@ -85,6 +92,13 @@ public static class EcfSubmissionStatus
 
     public const string Rechazado = "Rechazado";
 
-    /// <summary>A local or transport error prevented submission (e.g. DGII unreachable).</summary>
+    /// <summary>
+    /// The signed e-CF could not be transmitted to the DGII (no connectivity / DGII unreachable).
+    /// Per DGII rules this must be resolved — successfully sent — within 72 hours of
+    /// <see cref="EcfSubmission.ContingencySince"/>.
+    /// </summary>
+    public const string Contingencia = "Contingencia";
+
+    /// <summary>A local error unrelated to connectivity prevented submission (e.g. bad configuration).</summary>
     public const string Error = "Error";
 }

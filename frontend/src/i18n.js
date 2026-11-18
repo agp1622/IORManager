@@ -291,6 +291,9 @@ const translations = {
       ecfRefreshing: 'Checking status…',
       ecfRefreshError: 'Could not check the e-CF status.',
       ecfStatusLabel: 'e-CF status',
+      ecfRetry: 'Retry e-CF send',
+      ecfRetrying: 'Retrying…',
+      ecfRetryError: 'Could not retry sending the e-CF.',
     },
     preview: {
       heading: 'Preview',
@@ -788,6 +791,9 @@ const translations = {
       ecfRefreshing: 'Consultando estado…',
       ecfRefreshError: 'No se pudo consultar el estado del e-CF.',
       ecfStatusLabel: 'Estado e-CF',
+      ecfRetry: 'Reintentar envío e-CF',
+      ecfRetrying: 'Reintentando…',
+      ecfRetryError: 'No se pudo reintentar el envío del e-CF.',
     },
     preview: {
       heading: 'Vista previa',
