@@ -76,9 +76,28 @@ en la Oficina Virtual (OFV) y en el portal de Certificación de Facturación Ele
 - RNC inscrito y al día con tus obligaciones tributarias.
 - Clave de acceso a la OFV.
 - Certificado Digital para Procesos Tributarios, emitido por una entidad certificadora autorizada
-  por el INDOTEL, a nombre de la persona que representará a la empresa ante la DGII.
+  por el INDOTEL (no por la DGII), a nombre de la persona que representará a la empresa ante la
+  DGII. Ver "Cómo obtener el certificado digital" más abajo.
 - Formulario **FI-GDF-016** (Solicitud para ser Emisor Electrónico) completado.
-- Cumplimiento de la Norma General 06-2018 sobre Comprobantes Fiscales.
+- Cumplimiento del marco legal vigente de facturación electrónica: **Ley 32-23** y su reglamento de
+  aplicación, el **Decreto 587-24** (sustituyen/complementan a la Norma General 06-2018, que seguía
+  siendo la referencia técnica de los comprobantes fiscales en general).
+
+### Cómo obtener el certificado digital
+
+La DGII no lo emite — lo emite una entidad de certificación autorizada por el INDOTEL. Verifica la
+lista vigente en [indotel.gob.do/firma-digital/entidades-de-certificacion](https://indotel.gob.do/firma-digital/entidades-de-certificacion/)
+antes de contratar con nadie; entre las entidades con autorización/renovación conocida por
+resoluciones de INDOTEL están la Cámara de Comercio y Producción de Santo Domingo, BanReservas,
+OPTIC, la Asociación de Bancos Múltiples (ABA), Avansi y Novosit. El trámite típico pide cédula o
+pasaporte de la persona que firmará en representación de la empresa, el RNC de la empresa y datos
+de contacto; el costo lo cotiza cada entidad directamente, no está estandarizado públicamente.
+
+La DGII sí ofrece un primer certificado **gratis** para quienes usan su "Facturador Gratuito", pero
+ese certificado solo sirve dentro de esa plataforma — no es válido para un software propio como
+este. Como este sistema es desarrollo propio (una de las 3 vías que permite el artículo 12 de la
+Ley 32-23: desarrollo propio, proveedor certificado, o Facturador Gratuito), necesitas el
+certificado "de verdad", contratado con una entidad certificadora.
 
 ### Las 3 etapas
 
